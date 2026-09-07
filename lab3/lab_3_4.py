@@ -41,6 +41,26 @@ def rsa_encrypt_file(file_bytes, public_key):
 
     return enc_session_key, nonce, tag, ciphertext
 
+#def rsa_encrypt_file(data, public_key):
+
+    # Generate random 256-bit AES session key
+
+    #session_key = get_random_bytes(32)
+
+    # Encrypt AES key using RSA public key
+
+    #rsa_cipher = PKCS1_OAEP.new(public_key)
+
+    #encrypted_session_key = rsa_cipher.encrypt(session_key)
+
+    # Encrypt actual file using AES-GCM
+
+   # aes_cipher = AES.new(session_key, AES.MODE_GCM)
+
+    #ciphertext, tag = aes_cipher.encrypt_and_digest(data)
+
+   # return encrypted_session_key, aes_cipher.nonce, tag, ciphertext
+
 
 def rsa_decrypt_file(enc_session_key, nonce, tag, ciphertext, private_key):
     # Decrypt AES session key using RSA private key
@@ -93,6 +113,20 @@ def ecc_decrypt_file(ephemeral_pub, nonce, tag, ciphertext, recipient_priv_key):
 
 # ---------------- BENCHMARKING ----------------
 
+#print("\n========== FILE INPUT ==========")
+
+#filename = input("Enter .txt file name: ")
+
+#with open(filename, "rb") as file:
+
+    #data = file.read()
+
+#file_size = len(data)
+
+#print(f"File Name : {filename}")
+
+#print(f"File Size : {file_size / (1024 * 1024):.2f} MB")
+
 file_sizes = [1, 10]  # MB
 
 print("--- 2. FILE ENCRYPTION & DECRYPTION BENCHMARK ---")
@@ -122,3 +156,31 @@ for size in file_sizes:
 
     print(f"RSA-2048 Encrypt Time : {rsa_enc_time * 1e3:.2f} ms | Decrypt Time : {rsa_dec_time * 1e3:.2f} ms")
     print(f"ECC-P256 Encrypt Time : {ecc_enc_time * 1e3:.2f} ms | Decrypt Time : {ecc_dec_time * 1e3:.2f} ms")
+
+#message.txt
+#========== KEY GENERATION ==========
+#RSA-2048 KeyGen Time : 126.48 ms
+#ECC-P256 KeyGen Time : 2.91 ms
+
+#========== FILE INPUT ==========
+#Enter .txt file name: message.txt
+#File Name : message.txt
+#File Size : 0.00 MB
+
+#========== RSA-2048 ==========
+#Encryption Time : 1.42 ms
+#Decryption Time : 0.88 ms
+#Verification    : SUCCESS
+
+#========== ECC-P256 ==========
+#Encryption Time : 1.36 ms
+#Decryption Time : 0.72 ms
+#Verification    : SUCCESS
+
+#========== PERFORMANCE COMPARISON ==========
+#File Size: 0.00 MB
+
+#                Encryption       Decryption
+#------------------------------------------------
+#RSA-2048            1.42 ms           0.88 ms
+#ECC-P256            1.36 ms           0.72 ms
