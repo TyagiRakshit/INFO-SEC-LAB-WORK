@@ -1,0 +1,182 @@
+from cryptography.hazmat.primitives.asymmetric import rsa, x25519, padding
+from cryptography.hazmat.primitives import hashes
+
+
+class KeyManager:
+
+    def __init__(self):
+        self.systems = {}
+
+    def add_system(self, name):
+        rsa_private = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048
+        )
+
+        dh_private = x25519.X25519PrivateKey.generate()
+
+        self.systems[name] = {
+            "rsa_private": rsa_private,
+            "rsa_public": rsa_private.public_key(),
+            "dh_private": dh_private,
+            "dh_public": dh_private.public_key(),
+            "active": True
+        }
+
+        print(name, "registered successfully.")
+
+    def get_public_keys(self, name):
+
+        if name not in self.systems:
+            raise ValueError("System not found.")
+
+        if not self.systems[name]["active"]:
+            raise ValueError("System keys have been revoked.")
+
+        return (
+            self.systems[name]["rsa_public"],
+            self.systems[name]["dh_public"]
+        )
+
+    def revoke_system(self, name):
+
+        if name not in self.systems:
+            raise ValueError("System not found.")
+
+        self.systems[name]["active"] = False
+        print(name, "keys revoked.")
+
+
+def perform_dh_exchange(km, system1, system2):
+
+    a = km.systems[system1]
+    b = km.systems[system2]
+
+    if not a["active"] or not b["active"]:
+        raise ValueError("One system has revoked keys.")
+
+    secret1 = a["dh_private"].exchange(b["dh_public"])
+    secret2 = b["dh_private"].exchange(a["dh_public"])
+
+    print("\n--- DIFFIE-HELLMAN KEY EXCHANGE ---")
+
+    if secret1 == secret2:
+        print("Shared secret established successfully.")
+    else:
+        print("Key exchange failed.")
+
+
+def rsa_encrypt(message, public_key):
+
+    return public_key.encrypt(
+        message.encode(),
+        padding.OAEP(
+            mgf=padding.MGF1(hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+
+
+def rsa_decrypt(ciphertext, private_key):
+
+    plaintext = private_key.decrypt(
+        ciphertext,
+        padding.OAEP(
+            mgf=padding.MGF1(hashes.SHA256()),
+            algorithm=hashes.SHA256(),
+            label=None
+        )
+    )
+
+    return plaintext.decode()
+
+
+# ---------------- MAIN PROGRAM ----------------
+
+km = KeyManager()
+
+print("SECURECORP KEY MANAGEMENT SYSTEM")
+
+n = int(input("\nEnter number of systems: "))
+
+for i in range(n):
+    name = input("Enter system name: ")
+    km.add_system(name)
+
+
+while True:
+
+    print("\n--- MENU ---")
+    print("1. Diffie-Hellman Key Exchange")
+    print("2. RSA Encrypt Message")
+    print("3. Revoke System")
+    print("4. Add New System")
+    print("5. Display Systems")
+    print("6. Exit")
+
+    choice = input("Enter choice: ")
+
+    if choice == "1":
+
+        a = input("Enter first system: ")
+        b = input("Enter second system: ")
+
+        try:
+            perform_dh_exchange(km, a, b)
+        except ValueError as e:
+            print(e)
+
+    elif choice == "2":
+
+        sender = input("Enter sender system: ")
+        receiver = input("Enter receiver system: ")
+        message = input("Enter message: ")
+
+        try:
+            receiver_public, _ = km.get_public_keys(receiver)
+
+            encrypted = rsa_encrypt(message, receiver_public)
+
+            receiver_private = km.systems[receiver]["rsa_private"]
+
+            decrypted = rsa_decrypt(
+                encrypted,
+                receiver_private
+            )
+
+            print("\nEncrypted message:", encrypted.hex())
+            print("Decrypted message:", decrypted)
+
+        except ValueError as e:
+            print(e)
+
+    elif choice == "3":
+
+        name = input("Enter system to revoke: ")
+
+        try:
+            km.revoke_system(name)
+        except ValueError as e:
+            print(e)
+
+    elif choice == "4":
+
+        name = input("Enter new system name: ")
+        km.add_system(name)
+
+    elif choice == "5":
+
+        print("\nRegistered Systems:")
+
+        for name, data in km.systems.items():
+            status = "Active" if data["active"] else "Revoked"
+            print(name, "-", status)
+
+    elif choice == "6":
+
+        print("Exiting...")
+        break
+
+    else:
+        print("Invalid choice.")
