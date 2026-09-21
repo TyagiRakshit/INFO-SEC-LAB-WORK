@@ -1,82 +1,181 @@
-import random
-import time
+from Crypto.PublicKey import ECC
+from Crypto.Protocol.DH import key_agreement
 from Crypto.Hash import SHA256
 
-# ---------------- 1. GLOBAL PARAMETERS (RFC 3526 - 2048-bit MODP Group) ----------------
 
-# 2048-bit Prime (p) and Generator (g = 2)
-P_HEX = """
-FFFFFFFF FFFFFFFF C90FDAA2 2168C234 C4C6628B 80DC1CD1
-29024E08 8A67CC74 020BBEA6 3B139B22 514A0879 8E3404DD
-EF9519B3 CD3A431B 302B0A6D F25F1437 4FE1356D 6D51C245
-E485B576 625E7EC6 F44C42E9 A637ED6B 0BFF5CB6 F406B7ED
-EE386BFB 5A899FA5 AE9F2411 7C4B1FE6 49286651 ECE45B3D
-C2007CB8 A163BF05 98DA4836 1C55D39A 69163FA8 FD24CF5F
-83655D23 BCA3D2CA 604DF226 53148649 4873FAC4 F5CF1DDC
-D124A6A9 3A1D6406 C4CAD64B 6A3099D5 EF6A20B9 54F84801
-A6439E40 6700BA08 2E5E0B0F 3722BE75 4A060556 7D965425
-7E7D207B 709A5D2C 1401636D C1392A09 6C48800D 3B1423B2
-E54FE056 805973B4 19861FE6 6730D48D 757D2FEA 29DF8E76
-64C4B507 1B9FE2D7 003B7E6D 303E505B C693117E 0B9105B6
-1901B14E 82608556 61840049 80681073 9CE14883 658D2E49
-B914E01F 7196020E FE160620 5005D5D2 9A724A47 a3864613
-02DA1916 001B3408 6CE69367 1908C6EC C64279B7 550373FF
-FFFFFFFF FFFFFFFF
-"""
-p = int(P_HEX.replace(" ", "").replace("\n", ""), 16)
-g = 2
+# ============================================================
+# 1. GENERATE ECC KEY PAIR FOR A PEER
+# ============================================================
 
+def generate_keys():
 
-# ---------------- 2. KEY GENERATION ----------------
+    # Each peer generates its own PRIVATE key.
+    #
+    # P-256 is the ECC curve used here.
+    #
+    # IMPORTANT:
+    # Private key  -> must NEVER be shared
+    # Public key   -> can be shared openly
+    #
+    # If the question specifies another ECC curve,
+    # replace "P-256" with that curve.
+    
+    private_key = ECC.generate(curve="P-256")
 
-print("--- 1. DIFFIE-HELLMAN KEY GENERATION ---")
+    # Derive the public key from the private key.
+    public_key = private_key.public_key()
 
-# Peer A generates private key (a) and public key (A = g^a mod p)
-start_a = time.perf_counter()
-peer_a_priv = random.randint(2, p - 2)
-peer_a_pub = pow(g, peer_a_priv, p)
-peer_a_keygen_time = time.perf_counter() - start_a
-
-# Peer B generates private key (b) and public key (B = g^b mod p)
-start_b = time.perf_counter()
-peer_b_priv = random.randint(2, p - 2)
-peer_b_pub = pow(g, peer_b_priv, p)
-peer_b_keygen_time = time.perf_counter() - start_b
-
-print(f"Peer A Key Generation Time : {peer_a_keygen_time * 1e3:.4f} ms")
-print(f"Peer B Key Generation Time : {peer_b_keygen_time * 1e3:.4f} ms\n")
+    return private_key, public_key
 
 
-# ---------------- 3. SHARED SECRET DERIVATION ----------------
+# ============================================================
+# 2. DERIVE THE SHARED SECRET
+# ============================================================
 
-def kdf(shared_int):
-    # Convert integer secret to bytes and hash to produce a 256-bit key
-    secret_bytes = shared_int.to_bytes((shared_int.bit_length() + 7) // 8, byteorder='big')
-    return SHA256.new(secret_bytes).digest()
+def generate_shared_secret(private_key, other_public_key):
+
+    # Diffie-Hellman / ECDH works using:
+    #
+    #       OUR PRIVATE KEY
+    #              +
+    #       OTHER PEER'S PUBLIC KEY
+    #              |
+    #              v
+    #         SHARED SECRET
+    #
+    # The important property is:
+    #
+    # Peer A calculates:
+    #
+    #     A_private + B_public
+    #
+    # Peer B calculates:
+    #
+    #     B_private + A_public
+    #
+    # Both obtain the SAME shared secret.
+    #
+    # The secret itself is NEVER transmitted
+    # over the insecure channel.
+
+    shared_secret = key_agreement(
+        static_priv=private_key,
+        static_pub=other_public_key,
+
+        # Convert the raw shared secret into a
+        # usable cryptographic key using SHA-256.
+        #
+        # This is a KDF (Key Derivation Function).
+        kdf=lambda x: SHA256.new(x).digest()
+    )
+
+    return shared_secret
 
 
-print("--- 2. SHARED SECRET DERIVATION ---")
+# ============================================================
+# MAIN PROGRAM
+# ============================================================
 
-# Peer A computes: S_A = (B ^ a) mod p
-start_ex_a = time.perf_counter()
-shared_secret_a = pow(peer_b_pub, peer_a_priv, p)
-key_a = kdf(shared_secret_a)
-peer_a_ex_time = time.perf_counter() - start_ex_a
-
-# Peer B computes: S_B = (A ^ b) mod p
-start_ex_b = time.perf_counter()
-shared_secret_b = pow(peer_a_pub, peer_b_priv, p)
-key_b = kdf(shared_secret_b)
-peer_b_ex_time = time.perf_counter() - start_ex_b
+print("========== DIFFIE-HELLMAN KEY EXCHANGE ==========")
 
 
-# ---------------- 4. RESULTS & VERIFICATION ----------------
+# ============================================================
+# STEP 1: PEER A GENERATES ITS KEYS
+# ============================================================
 
-print(f"Peer A Exchange Time      : {peer_a_ex_time * 1e3:.4f} ms")
-print(f"Peer B Exchange Time      : {peer_b_ex_time * 1e3:.4f} ms\n")
+print("\n--- Peer A Key Generation ---")
 
-print(f"Peer A Shared Key (Hex)   : {key_a.hex().upper()}")
-print(f"Peer B Shared Key (Hex)   : {key_b.hex().upper()}")
+a_private, a_public = generate_keys()
 
-assert key_a == key_b, "Key exchange failed! Keys do not match."
-print("\nSuccess: Both peers derived identical 256-bit shared keys!")
+print("Peer A generated:")
+print("  Private Key : Generated")
+print("  Public Key  : Generated")
+
+
+# ============================================================
+# STEP 2: PEER B GENERATES ITS KEYS
+# ============================================================
+
+print("\n--- Peer B Key Generation ---")
+
+b_private, b_public = generate_keys()
+
+print("Peer B generated:")
+print("  Private Key : Generated")
+print("  Public Key  : Generated")
+
+
+# ============================================================
+# STEP 3: PUBLIC KEY EXCHANGE
+# ============================================================
+
+# In a real peer-to-peer system:
+#
+# Peer A ------------------> Peer B
+#        A public key
+#
+# Peer B ------------------> Peer A
+#        B public key
+#
+# These PUBLIC keys can travel through an insecure channel.
+#
+# Neither peer sends its private key.
+#
+# For our program, we simply pass the public keys
+# to the other peer.
+
+print("\n--- Public Key Exchange ---")
+
+print("Peer A sends its public key to Peer B")
+print("Peer B sends its public key to Peer A")
+
+
+# ============================================================
+# STEP 4: PEER A CALCULATES SHARED SECRET
+# ============================================================
+
+print("\n--- Peer A Computes Shared Secret ---")
+
+a_shared_secret = generate_shared_secret(
+    a_private,
+    b_public
+)
+
+print("Peer A computed shared secret.")
+
+
+# ============================================================
+# STEP 5: PEER B CALCULATES SHARED SECRET
+# ============================================================
+
+print("\n--- Peer B Computes Shared Secret ---")
+
+b_shared_secret = generate_shared_secret(
+    b_private,
+    a_public
+)
+
+print("Peer B computed shared secret.")
+
+
+# ============================================================
+# STEP 6: VERIFY BOTH SECRETS
+# ============================================================
+
+print("\n--- Verification ---")
+
+if a_shared_secret == b_shared_secret:
+    print("SUCCESS: Both peers have the same shared secret.")
+else:
+    print("FAILED: Shared secrets do not match.")
+
+
+# ============================================================
+# OPTIONAL: DISPLAY THE SHARED KEY
+# ============================================================
+
+# In a real system, DO NOT print the shared secret.
+# We are printing it here only for laboratory demonstration.
+
+print("\nShared Secret:")
+print(a_shared_secret.hex())
