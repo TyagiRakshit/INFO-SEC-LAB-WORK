@@ -1,61 +1,44 @@
-'''
-SecureVault – Secure Record Management System
+"""
+============================================================
+                 SECUREVAULT
+        Secure Record Management System
+============================================================
 
-Design and implement an application named "SecureVault" for securely storing, authenticating, accessing, and auditing confidential client records. 
-The application must have three roles: Client, Lawyer, and Compliance Officer.
-The application must use:
-1. DES in CBC mode for encryption and decryption.
-2. SHA-256 for data integrity verification.
-3. ElGamal Digital Signature for authentication and verification.
+ROLES:
+    1. Client
+    2. Lawyer
+    3. Compliance Officer
+
+CRYPTOGRAPHIC TECHNIQUES:
+    1. DES-CBC       -> Confidentiality
+    2. SHA-256       -> Integrity
+    3. ElGamal       -> Digital Signature / Authentication
 
 CLIENT:
-
-The Client should:
-1. Enter/provide a confidential record.
-2. Encrypt the record using DES in CBC mode.
-3. Generate an IV and use it during encryption.
-4. Calculate the SHA-256 hash of the encrypted data.
-5. Generate an ElGamal digital signature using the client's private key.
-6. Display the following:
-- Ciphertext
-- IV
-- SHA-256 hash value
-- ElGamal signature
-- Timestamp
-7. Store the ciphertext, IV, hash value, signature, and timestamp in a file for future verification and access.
+    - Enters confidential record
+    - Encrypts using DES-CBC
+    - Generates random IV
+    - Calculates SHA-256 of ciphertext
+    - Signs ciphertext using ElGamal private key
+    - Stores ciphertext, IV, hash, signature and timestamp
 
 LAWYER:
-
-The Lawyer should:
-1. Read the stored ciphertext, IV, hash value, signature, and timestamp from the file.
-2. Recalculate the SHA-256 hash and compare it with the stored hash value.
-3. Verify the ElGamal digital signature using the client's public key.
-4. Display the hash verification and signature verification status.
-5. Only if the hash and signature verification are successful, decrypt the ciphertext using DES in CBC mode.
-6. Display the recovered plaintext record.
-7. Store the verification/access status along with a timestamp.
-
-If the integrity or signature verification fails, the Lawyer must not decrypt or access the plaintext.
+    - Loads encrypted record
+    - Verifies SHA-256
+    - Verifies ElGamal signature
+    - Decrypts ONLY if both checks pass
+    - Displays plaintext
+    - Logs access
 
 COMPLIANCE OFFICER:
+    - Loads encrypted record
+    - Verifies SHA-256
+    - Verifies ElGamal signature
+    - Generates compliance report
+    - NEVER decrypts or accesses plaintext
 
-The Compliance Officer should:
-1. Access the stored encrypted record and its associated security metadata.
-2. Verify the SHA-256 hash to check whether the stored data has been modified.
-3. Verify the ElGamal digital signature using the client's public key.
-4. Display the hash verification and signature verification status.
-5. Record the verification results along with a timestamp.
-6. Generate a Compliance Report containing the verification status and relevant metadata.
-7. The Compliance Officer must NOT decrypt the ciphertext or access the client's plaintext record.
-
-The application should maintain proper role-based access, ensuring that:
-- The Client can create and securely store records.
-- The Lawyer can verify and decrypt records after successful authentication.
-- The Compliance Officer can independently audit the record's integrity and authenticity without accessing the plaintext.
-
-The system should clearly display all relevant security information and verification results.
-
-'''
+============================================================
+"""
 
 import json
 import math
@@ -65,57 +48,65 @@ from datetime import datetime
 from Crypto.Cipher import DES
 from Crypto.Util.Padding import pad, unpad
 from Crypto.Hash import SHA256
-from Crypto.Util.number import getPrime
+from Crypto.Util.number import getPrime, isPrime
 
 
 # ============================================================
 #                    CONFIGURATION
 # ============================================================
 
+# File where encrypted record and security metadata are stored
 RECORD_FILE = "secure_record.json"
+
+# File where role activities are recorded
 AUDIT_FILE = "audit_log.txt"
+
+# File where compliance report is stored
+COMPLIANCE_FILE = "compliance_report.json"
 
 
 # ============================================================
 #                    DES KEY
 # ============================================================
-#
-# DES requires EXACTLY 8 bytes = 64 bits.
-#
-# For a real system, the DES key should NEVER be hardcoded.
-# It should be stored in a secure key-management system.
-#
-# For this LAB, we ask the user to enter an 8-character key.
-#
-# Example:
-#
-#       12345678
-#
-# ============================================================
-
 
 def get_des_key():
     """
     Ask the user for an 8-byte DES key.
 
-    DES requires exactly 8 bytes.
+    DES uses a block/key size of 64 bits = 8 bytes.
+
+    Example:
+        12345678
+
+    IMPORTANT:
+    For this lab, we simply ask the user to enter
+    an 8-character key.
     """
 
     while True:
 
-        key = input("Enter DES key (exactly 8 characters): ")
+        key = input(
+            "Enter DES key (exactly 8 characters): "
+        )
 
+        # Convert string to bytes and check length.
+        #
+        # We check bytes rather than characters because
+        # DES operates on bytes.
         if len(key.encode()) == 8:
+
             return key.encode()
 
-        print("DES key must be exactly 8 bytes.")
+        print(
+            "ERROR: DES key must be exactly 8 bytes."
+        )
 
 
 # ============================================================
-#                    ELGAMAL DIGITAL SIGNATURE
+#                ELGAMAL KEY GENERATION
 # ============================================================
 #
-# ElGamal Signature uses:
+# ElGamal uses:
 #
 #       p = large prime
 #       g = generator
@@ -129,142 +120,193 @@ def get_des_key():
 #       y = g^x mod p
 #
 # ------------------------------------------------------------
-# SIGNING
+# IMPORTANT FIX:
 # ------------------------------------------------------------
 #
-# Hash the message:
+# The original program tried to factor p-1 by checking:
 #
-#       H = SHA256(message)
+#       2, 3, 4, 5, 6, ...
 #
-# Choose random k such that:
+# for a 256-bit prime.
 #
-#       gcd(k, p-1) = 1
+# This caused the program to appear frozen before reaching
+# the menu.
 #
-# Calculate:
+# Instead, we generate a SAFE PRIME:
 #
-#       r = g^k mod p
+#       p = 2q + 1
 #
-#       s = k^-1 (H - x*r) mod (p-1)
+# where both p and q are prime.
 #
-# Signature:
+# Therefore:
 #
-#       (r, s)
+#       p - 1 = 2q
 #
-# ------------------------------------------------------------
-# VERIFICATION
-# ------------------------------------------------------------
+# The only prime factors of p-1 are:
 #
-# Verify:
+#       2 and q
 #
-#       g^H mod p
-#
-# equals
-#
-#       y^r * r^s mod p
+# So finding a generator becomes very fast.
 #
 # ============================================================
 
 
-# ------------------------------------------------------------
-# FIND A PRIMITIVE ROOT / GENERATOR
-# ------------------------------------------------------------
-#
-# For ElGamal we need a generator g.
-#
-# This function finds a primitive root modulo p.
-#
-# This implementation is intentionally simple for the lab.
-# ------------------------------------------------------------
+def find_generator_safe_prime(p, q):
+    """
+    Find a generator g for a safe prime p.
 
-def find_generator(p):
+    Since:
 
-    # Factor p-1.
-    #
-    # We need the prime factors of p-1 to test whether g
-    # is a generator.
-    factors = []
+        p = 2q + 1
 
-    value = p - 1
-    factor = 2
+    we have:
 
-    while factor * factor <= value:
+        p - 1 = 2q
 
-        if value % factor == 0:
+    Therefore the prime factors of p-1 are only:
 
-            factors.append(factor)
+        2 and q
 
-            while value % factor == 0:
-                value //= factor
+    A primitive root g must satisfy:
 
-        factor += 1
+        g^((p-1)/2) mod p != 1
 
-    if value > 1:
-        factors.append(value)
+    and
 
+        g^((p-1)/q) mod p != 1
 
-    # Try possible generators.
-    for g in range(2, p):
+    Which becomes:
 
-        valid = True
+        g^q mod p != 1
 
-        for factor in factors:
+    and:
 
-            # A primitive root must satisfy:
-            #
-            # g^((p-1)/q) != 1 mod p
-            #
-            # for every prime factor q of p-1.
-            if pow(g, (p - 1) // factor, p) == 1:
+        g^2 mod p != 1
+    """
 
-                valid = False
-                break
+    # Try small possible generators.
+    for g in range(2, 100):
 
-        if valid:
-            return g
+        # First condition:
+        #
+        # g^q mod p must NOT be 1.
+        if pow(g, q, p) == 1:
 
-    raise ValueError("Could not find generator.")
+            continue
+
+        # Second condition:
+        #
+        # g^2 mod p must NOT be 1.
+        if pow(g, 2, p) == 1:
+
+            continue
+
+        # Both conditions passed.
+        return g
+
+    raise ValueError(
+        "Could not find a generator."
+    )
 
 
-# ------------------------------------------------------------
-# GENERATE ELGAMAL KEY PAIR
-# ------------------------------------------------------------
+# ============================================================
+#             GENERATE ELGAMAL KEY PAIR
+# ============================================================
 
 def generate_elgamal_keys():
+    """
+    Generate ElGamal parameters and keys.
 
-    # Generate a prime p.
+    We generate a safe prime:
+
+        p = 2q + 1
+
+    where p and q are both prime.
+
+    Then:
+
+        g = generator
+
+        x = private key
+
+        y = g^x mod p
+
+    Public key:
+        (p, g, y)
+
+    Private key:
+        x
+    """
+
+    print("\nGenerating ElGamal keys...")
+
+    # --------------------------------------------------------
+    # STEP 1:
     #
-    # 256 bits is enough for a lab demonstration.
+    # Generate q and p until both are prime.
     #
-    # For real cryptographic systems, much stronger parameters
-    # and standardized schemes should be used.
-    p = getPrime(256)
+    # q = 255-bit prime
+    #
+    # p = 2q + 1
+    # --------------------------------------------------------
 
+    while True:
 
+        # Generate a random 255-bit prime q.
+        q = getPrime(255)
+
+        # Construct candidate safe prime.
+        p = 2 * q + 1
+
+        # Check whether p is also prime.
+        if isPrime(p):
+
+            break
+
+    # --------------------------------------------------------
+    # STEP 2:
+    #
     # Find generator g.
-    g = find_generator(p)
+    # --------------------------------------------------------
 
+    g = find_generator_safe_prime(
+        p,
+        q
+    )
 
     # --------------------------------------------------------
-    # PRIVATE KEY
-    # --------------------------------------------------------
+    # STEP 3:
     #
-    # Choose:
+    # Generate private key x.
     #
     #       1 < x < p-1
+    # --------------------------------------------------------
+
+    x = secrets.randbelow(
+        p - 2
+    ) + 1
+
+    # --------------------------------------------------------
+    # STEP 4:
     #
-    x = secrets.randbelow(p - 2) + 1
-
-
-    # --------------------------------------------------------
-    # PUBLIC KEY
-    # --------------------------------------------------------
+    # Generate public key y.
     #
     #       y = g^x mod p
-    #
-    y = pow(g, x, p)
+    # --------------------------------------------------------
 
+    y = pow(
+        g,
+        x,
+        p
+    )
 
+    print(
+        "ElGamal keys generated successfully."
+    )
+
+    # Return everything needed by the program.
     return {
+
         "p": p,
         "g": g,
         "x": x,
@@ -273,202 +315,285 @@ def generate_elgamal_keys():
 
 
 # ============================================================
-#                    ELGAMAL SIGNATURE
+#                 ELGAMAL DIGITAL SIGNATURE
+# ============================================================
+#
+# We sign the encrypted ciphertext.
+#
+# First:
+#
+#       H = SHA256(ciphertext)
+#
+# Then choose random k such that:
+#
+#       gcd(k, p-1) = 1
+#
+# Calculate:
+#
+#       r = g^k mod p
+#
+#       s = k^-1(H - xr) mod (p-1)
+#
+# Signature:
+#
+#       (r, s)
+#
 # ============================================================
 
+
 def elgamal_sign(data, private_key):
+    """
+    Create an ElGamal digital signature for data.
+    """
 
     p = private_key["p"]
     g = private_key["g"]
     x = private_key["x"]
 
+    # --------------------------------------------------------
+    # STEP 1:
+    #
+    # Calculate SHA-256 hash of the data.
+    #
+    # The hash is converted to an integer because
+    # ElGamal mathematical operations use integers.
+    # --------------------------------------------------------
+
+    hash_value = SHA256.new(
+        data
+    ).digest()
+
+    h = int.from_bytes(
+        hash_value,
+        "big"
+    )
 
     # --------------------------------------------------------
-    # STEP 1: SHA-256 HASH
-    # --------------------------------------------------------
+    # STEP 2:
     #
-    # We do NOT sign the entire data directly.
+    # Generate random k.
     #
-    # Instead:
-    #
-    #       data
-    #         ↓
-    #       SHA-256
-    #         ↓
-    #       hash
-    #
-    # The hash is converted into an integer because ElGamal
-    # operates on numbers.
-    #
-    hash_value = SHA256.new(data).digest()
-
-    h = int.from_bytes(hash_value, "big")
-
-
-    # --------------------------------------------------------
-    # STEP 2: GENERATE RANDOM k
-    # --------------------------------------------------------
-    #
-    # k must satisfy:
+    # We require:
     #
     #       gcd(k, p-1) = 1
     #
-    # because we need:
-    #
-    #       k^-1 mod (p-1)
-    #
+    # because we need k inverse modulo p-1.
+    # --------------------------------------------------------
+
     while True:
 
-        k = secrets.randbelow(p - 2) + 1
+        k = secrets.randbelow(
+            p - 2
+        ) + 1
 
-        if math.gcd(k, p - 1) == 1:
+        if math.gcd(
+            k,
+            p - 1
+        ) == 1:
+
             break
 
-
     # --------------------------------------------------------
-    # STEP 3: CALCULATE r
-    # --------------------------------------------------------
+    # STEP 3:
+    #
+    # Calculate:
     #
     #       r = g^k mod p
-    #
-    r = pow(g, k, p)
+    # --------------------------------------------------------
 
+    r = pow(
+        g,
+        k,
+        p
+    )
 
     # --------------------------------------------------------
-    # STEP 4: CALCULATE s
+    # STEP 4:
+    #
+    # Calculate inverse of k:
+    #
+    #       k^-1 mod (p-1)
     # --------------------------------------------------------
+
+    k_inverse = pow(
+        k,
+        -1,
+        p - 1
+    )
+
+    # --------------------------------------------------------
+    # STEP 5:
     #
-    #       s = k^-1 (H - x*r) mod (p-1)
+    # Calculate:
     #
-    k_inverse = pow(k, -1, p - 1)
+    #       s = k^-1(H - xr) mod (p-1)
+    # --------------------------------------------------------
 
     s = (
-        k_inverse * (h - x * r)
+        k_inverse *
+        (h - x * r)
     ) % (p - 1)
 
-
-    # Signature consists of:
-    #
-    #       (r, s)
-    #
+    # Return signature pair.
     return r, s
 
 
 # ============================================================
-#                 ELGAMAL SIGNATURE VERIFICATION
+#              ELGAMAL SIGNATURE VERIFICATION
 # ============================================================
 
-def elgamal_verify(data, signature, public_key):
+def elgamal_verify(
+    data,
+    signature,
+    public_key
+):
+    """
+    Verify an ElGamal digital signature.
+
+    Verification equation:
+
+        g^H mod p
+
+    must equal:
+
+        y^r * r^s mod p
+    """
 
     p = public_key["p"]
     g = public_key["g"]
     y = public_key["y"]
 
-
     r, s = signature
 
-
     # --------------------------------------------------------
-    # CHECK THAT r AND s ARE VALID
+    # Check that r is within valid range.
     # --------------------------------------------------------
 
-    if not (0 < r < p):
+    if not (
+        0 < r < p
+    ):
+
         return False
 
-    if not (0 < s < p - 1):
+    # --------------------------------------------------------
+    # Check that s is within valid range.
+    # --------------------------------------------------------
+
+    if not (
+        0 < s < p - 1
+    ):
+
         return False
 
-
     # --------------------------------------------------------
-    # CALCULATE MESSAGE HASH AGAIN
-    # --------------------------------------------------------
+    # Calculate SHA-256 hash again.
     #
-    # The verifier independently calculates SHA-256.
-    #
-    hash_value = SHA256.new(data).digest()
+    # The verifier independently hashes the ciphertext.
+    # --------------------------------------------------------
 
-    h = int.from_bytes(hash_value, "big")
+    hash_value = SHA256.new(
+        data
+    ).digest()
 
+    h = int.from_bytes(
+        hash_value,
+        "big"
+    )
 
     # --------------------------------------------------------
-    # ELGAMAL VERIFICATION EQUATION
-    # --------------------------------------------------------
-    #
-    # Left:
+    # LEFT SIDE:
     #
     #       g^H mod p
-    #
-    left = pow(g, h, p)
+    # --------------------------------------------------------
 
+    left = pow(
+        g,
+        h,
+        p
+    )
 
-    # Right:
+    # --------------------------------------------------------
+    # RIGHT SIDE:
     #
-    #       y^r × r^s mod p
-    #
+    #       y^r * r^s mod p
+    # --------------------------------------------------------
+
     right = (
         pow(y, r, p) *
         pow(r, s, p)
     ) % p
 
-
-    # If both values are equal, the signature is valid.
+    # Signature is valid if both sides match.
     return left == right
 
 
 # ============================================================
 #                    DES ENCRYPTION
 # ============================================================
-#
-# DES works on 64-bit blocks.
-#
-# CBC = Cipher Block Chaining
-#
-# Encryption of each block depends on the previous ciphertext
-# block.
-#
-# We need an IV:
-#
-#       IV = Initialization Vector
-#
-# IV is NOT secret and can be stored with ciphertext.
-#
-# ============================================================
 
-def des_encrypt(plaintext, key):
+def des_encrypt(
+    plaintext,
+    key
+):
+    """
+    Encrypt plaintext using DES in CBC mode.
 
-    # Create a random 8-byte IV.
-    #
+    Steps:
+
+        1. Generate random IV
+        2. Convert plaintext to bytes
+        3. Apply PKCS#7 padding
+        4. Encrypt using DES-CBC
+        5. Return ciphertext and IV
+    """
+
+    # --------------------------------------------------------
     # DES block size = 8 bytes.
     #
-    iv = secrets.token_bytes(8)
+    # Therefore IV must also be 8 bytes.
+    # --------------------------------------------------------
 
+    iv = secrets.token_bytes(
+        8
+    )
 
-    # Create DES cipher in CBC mode.
+    # --------------------------------------------------------
+    # Create DES-CBC cipher.
+    # --------------------------------------------------------
+
     cipher = DES.new(
         key,
         DES.MODE_CBC,
         iv
     )
 
+    # --------------------------------------------------------
+    # Convert plaintext string into bytes.
+    # --------------------------------------------------------
 
-    # Convert plaintext to bytes.
     plaintext_bytes = plaintext.encode()
 
-
-    # CBC requires complete 8-byte blocks.
+    # --------------------------------------------------------
+    # DES-CBC requires data length to be a multiple
+    # of the block size.
     #
-    # PKCS#7 padding adds extra bytes when necessary.
+    # PKCS#7 adds padding when necessary.
+    # --------------------------------------------------------
+
     padded_data = pad(
         plaintext_bytes,
         DES.block_size
     )
 
-
+    # --------------------------------------------------------
     # Encrypt padded plaintext.
-    ciphertext = cipher.encrypt(padded_data)
+    # --------------------------------------------------------
 
+    ciphertext = cipher.encrypt(
+        padded_data
+    )
 
-    # Return both ciphertext and IV.
+    # Return ciphertext and IV.
     return ciphertext, iv
 
 
@@ -476,32 +601,53 @@ def des_encrypt(plaintext, key):
 #                    DES DECRYPTION
 # ============================================================
 
-def des_decrypt(ciphertext, key, iv):
+def des_decrypt(
+    ciphertext,
+    key,
+    iv
+):
+    """
+    Decrypt DES-CBC ciphertext.
 
-    # Recreate the same DES-CBC cipher using:
-    #
-    #       same key
-    #       same IV
-    #
+    The same:
+
+        key
+        IV
+
+    used during encryption are required.
+    """
+
+    # --------------------------------------------------------
+    # Recreate DES-CBC cipher.
+    # --------------------------------------------------------
+
     cipher = DES.new(
         key,
         DES.MODE_CBC,
         iv
     )
 
-
+    # --------------------------------------------------------
     # Decrypt ciphertext.
-    padded_plaintext = cipher.decrypt(ciphertext)
+    # --------------------------------------------------------
 
+    padded_plaintext = cipher.decrypt(
+        ciphertext
+    )
 
+    # --------------------------------------------------------
     # Remove PKCS#7 padding.
+    # --------------------------------------------------------
+
     plaintext = unpad(
         padded_plaintext,
         DES.block_size
     )
 
+    # --------------------------------------------------------
+    # Convert bytes back into a normal string.
+    # --------------------------------------------------------
 
-    # Convert bytes back to string.
     return plaintext.decode()
 
 
@@ -510,38 +656,55 @@ def des_decrypt(ciphertext, key, iv):
 # ============================================================
 
 def calculate_hash(data):
-
     """
-    Calculate SHA-256 hash of the supplied bytes.
+    Calculate SHA-256 hash of the supplied data.
 
-    SHA-256 provides integrity verification.
+    SHA-256 is used for integrity verification.
 
-    IMPORTANT:
-    SHA-256 does NOT encrypt the data.
+    It does NOT encrypt the data.
+
+    Example:
+
+        ciphertext
+             |
+             v
+         SHA-256
+             |
+             v
+        hash value
     """
 
-    return SHA256.new(data).hexdigest()
+    return SHA256.new(
+        data
+    ).hexdigest()
 
 
 # ============================================================
 #                    AUDIT LOGGING
 # ============================================================
 
-def audit_log(role, operation, status):
-
+def audit_log(
+    role,
+    operation,
+    status
+):
     """
-    Store role/activity/status with timestamp.
+    Record an activity in the audit log.
 
     Example:
 
-    2026-09-21 04:20:10 | LAWYER | ACCESS | SUCCESS
-
+        2026-09-21 09:30:20 |
+        LAWYER |
+        ACCESS |
+        SUCCESS
     """
 
+    # Generate current timestamp.
     timestamp = datetime.now().strftime(
         "%Y-%m-%d %H:%M:%S"
     )
 
+    # Create log entry.
     entry = (
         f"{timestamp} | "
         f"{role} | "
@@ -549,9 +712,14 @@ def audit_log(role, operation, status):
         f"{status}\n"
     )
 
+    # Append to audit file.
+    #
+    # "a" means append, so previous logs are not deleted.
+    with open(
+        AUDIT_FILE,
+        "a"
+    ) as file:
 
-    # Append instead of overwriting previous logs.
-    with open(AUDIT_FILE, "a") as file:
         file.write(entry)
 
 
@@ -567,50 +735,77 @@ def save_record(
     timestamp,
     public_key
 ):
-
     """
-    Store all information required for future verification.
+    Store the encrypted record and security metadata.
 
-    Notice that plaintext is NOT stored.
+    IMPORTANT:
 
-    We store:
+    Plaintext is NEVER stored.
+
+    Stored information:
 
         ciphertext
         IV
         SHA-256 hash
         ElGamal signature
         timestamp
-        client's public key
-
+        public key
     """
+
+    # --------------------------------------------------------
+    # JSON cannot directly store bytes.
+    #
+    # Therefore:
+    #
+    #       bytes -> hexadecimal string
+    #
+    # is used.
+    # --------------------------------------------------------
 
     record = {
 
-        # Bytes cannot directly be stored in JSON.
-        # Therefore convert them to hexadecimal strings.
-        "ciphertext": ciphertext.hex(),
+        "ciphertext":
+            ciphertext.hex(),
 
-        "iv": iv.hex(),
+        "iv":
+            iv.hex(),
 
-        "sha256": hash_value,
+        "sha256":
+            hash_value,
 
         "signature": {
-            "r": signature[0],
-            "s": signature[1]
+
+            "r":
+                signature[0],
+
+            "s":
+                signature[1]
         },
 
-        "timestamp": timestamp,
+        "timestamp":
+            timestamp,
 
         "public_key": {
-            "p": public_key["p"],
-            "g": public_key["g"],
-            "y": public_key["y"]
+
+            "p":
+                public_key["p"],
+
+            "g":
+                public_key["g"],
+
+            "y":
+                public_key["y"]
         }
     }
 
+    # --------------------------------------------------------
+    # Store the dictionary as JSON.
+    # --------------------------------------------------------
 
-    # Write JSON file.
-    with open(RECORD_FILE, "w") as file:
+    with open(
+        RECORD_FILE,
+        "w"
+    ) as file:
 
         json.dump(
             record,
@@ -624,15 +819,16 @@ def save_record(
 # ============================================================
 
 def load_record():
-
     """
-    Read the previously stored SecureVault record.
+    Read the stored SecureVault record from JSON.
     """
 
-    with open(RECORD_FILE, "r") as file:
+    with open(
+        RECORD_FILE,
+        "r"
+    ) as file:
 
         record = json.load(file)
-
 
     return record
 
@@ -644,30 +840,35 @@ def load_record():
 def client_role(private_key):
 
     print("\n================================")
-    print("          CLIENT")
+    print("             CLIENT")
     print("================================")
 
-
     # --------------------------------------------------------
-    # STEP 1: GET CONFIDENTIAL RECORD
+    # STEP 1:
+    # Ask the client for confidential information.
     # --------------------------------------------------------
 
     plaintext = input(
         "Enter confidential client record: "
     )
 
+    # --------------------------------------------------------
+    # STEP 2:
+    # Get DES key.
+    #
+    # DES requires exactly 8 bytes.
+    # --------------------------------------------------------
 
-    # --------------------------------------------------------
-    # STEP 2: GET DES KEY
-    # --------------------------------------------------------
-    #
-    # The client uses the DES key to encrypt the record.
-    #
     des_key = get_des_key()
 
-
     # --------------------------------------------------------
-    # STEP 3: DES-CBC ENCRYPTION
+    # STEP 3:
+    # Encrypt record using DES-CBC.
+    #
+    # Result:
+    #
+    #       ciphertext
+    #       IV
     # --------------------------------------------------------
 
     ciphertext, iv = des_encrypt(
@@ -675,59 +876,64 @@ def client_role(private_key):
         des_key
     )
 
+    # --------------------------------------------------------
+    # STEP 4:
+    # Calculate SHA-256 hash of ciphertext.
+    #
+    # We hash the encrypted data rather than plaintext.
+    # --------------------------------------------------------
+
+    hash_value = calculate_hash(
+        ciphertext
+    )
 
     # --------------------------------------------------------
-    # STEP 4: SHA-256 OF ENCRYPTED DATA
+    # STEP 5:
+    # Generate ElGamal digital signature.
+    #
+    # We sign the ciphertext.
     # --------------------------------------------------------
-    #
-    # IMPORTANT:
-    #
-    # The question specifically asks for the hash of the
-    # ENCRYPTED DATA.
-    #
-    hash_value = calculate_hash(ciphertext)
 
-
-    # --------------------------------------------------------
-    # STEP 5: ELGAMAL DIGITAL SIGNATURE
-    # --------------------------------------------------------
-    #
-    # We sign the encrypted ciphertext.
-    #
-    # Therefore the signature protects the ciphertext's
-    # authenticity/integrity.
-    #
     signature = elgamal_sign(
         ciphertext,
         private_key
     )
 
-
     # --------------------------------------------------------
-    # STEP 6: TIMESTAMP
+    # STEP 6:
+    # Generate timestamp.
     # --------------------------------------------------------
 
     timestamp = datetime.now().strftime(
         "%Y-%m-%d %H:%M:%S"
     )
 
+    # --------------------------------------------------------
+    # STEP 7:
+    # Extract public portion of ElGamal key.
+    #
+    # Public key:
+    #
+    #       (p, g, y)
+    #
+    # Private key x is NOT stored in the record.
+    # --------------------------------------------------------
 
-    # --------------------------------------------------------
-    # STEP 7: GET CLIENT PUBLIC KEY
-    # --------------------------------------------------------
-    #
-    # The lawyer and compliance officer need the public key
-    # to verify the ElGamal signature.
-    #
     public_key = {
-        "p": private_key["p"],
-        "g": private_key["g"],
-        "y": private_key["y"]
+
+        "p":
+            private_key["p"],
+
+        "g":
+            private_key["g"],
+
+        "y":
+            private_key["y"]
     }
 
-
     # --------------------------------------------------------
-    # STEP 8: SAVE EVERYTHING
+    # STEP 8:
+    # Save encrypted record and metadata.
     # --------------------------------------------------------
 
     save_record(
@@ -739,31 +945,50 @@ def client_role(private_key):
         public_key
     )
 
-
     # --------------------------------------------------------
     # DISPLAY SECURITY INFORMATION
     # --------------------------------------------------------
 
-    print("\n--- RECORD STORED SUCCESSFULLY ---")
+    print(
+        "\n--- RECORD STORED SUCCESSFULLY ---"
+    )
 
     print("\nCiphertext:")
-    print(ciphertext.hex())
+    print(
+        ciphertext.hex()
+    )
 
     print("\nIV:")
-    print(iv.hex())
+    print(
+        iv.hex()
+    )
 
     print("\nSHA-256 Hash:")
-    print(hash_value)
+    print(
+        hash_value
+    )
 
     print("\nElGamal Signature:")
-    print("r =", signature[0])
-    print("s =", signature[1])
+
+    print(
+        "r =",
+        signature[0]
+    )
+
+    print(
+        "s =",
+        signature[1]
+    )
 
     print("\nTimestamp:")
-    print(timestamp)
+    print(
+        timestamp
+    )
 
+    # --------------------------------------------------------
+    # Record activity in audit log.
+    # --------------------------------------------------------
 
-    # Audit the operation.
     audit_log(
         "CLIENT",
         "CREATE RECORD",
@@ -772,66 +997,74 @@ def client_role(private_key):
 
 
 # ============================================================
-#                 VERIFY SECURITY METADATA
+#              VERIFY SECURITY METADATA
 # ============================================================
 
 def verify_record(record):
-
     """
-    Common verification function.
+    Perform BOTH security checks:
 
-    BOTH Lawyer and Compliance Officer need to perform:
-
-        1. SHA-256 verification
+        1. SHA-256 integrity verification
         2. ElGamal signature verification
 
-    Therefore we keep the logic in one reusable function.
+    This function is used by:
+
+        Lawyer
+        Compliance Officer
+
+    Keeping it as a separate function avoids duplicating
+    cryptographic verification code.
     """
 
     # --------------------------------------------------------
-    # RECOVER STORED CIPHERTEXT
+    # Recover ciphertext from hexadecimal representation.
+    #
+    # hex string -> bytes
     # --------------------------------------------------------
 
     ciphertext = bytes.fromhex(
         record["ciphertext"]
     )
 
+    # ========================================================
+    #                 HASH VERIFICATION
+    # ========================================================
 
-    # --------------------------------------------------------
-    # 1. SHA-256 VERIFICATION
-    # --------------------------------------------------------
-
-    # Calculate hash again from the current ciphertext.
+    # Calculate hash again.
     calculated_hash = calculate_hash(
         ciphertext
     )
 
-
-    # Compare calculated hash with stored hash.
+    # Compare newly calculated hash with stored hash.
     hash_valid = (
         calculated_hash ==
         record["sha256"]
     )
 
+    # ========================================================
+    #             ELGAMAL SIGNATURE VERIFICATION
+    # ========================================================
 
-    # --------------------------------------------------------
-    # 2. ELGAMAL SIGNATURE VERIFICATION
-    # --------------------------------------------------------
-
-    # Recover stored signature.
+    # Recover signature.
     signature = (
+
         record["signature"]["r"],
+
         record["signature"]["s"]
     )
 
-
     # Recover client's public key.
     public_key = {
-        "p": record["public_key"]["p"],
-        "g": record["public_key"]["g"],
-        "y": record["public_key"]["y"]
-    }
 
+        "p":
+            record["public_key"]["p"],
+
+        "g":
+            record["public_key"]["g"],
+
+        "y":
+            record["public_key"]["y"]
+    }
 
     # Verify signature against ciphertext.
     signature_valid = elgamal_verify(
@@ -840,9 +1073,11 @@ def verify_record(record):
         public_key
     )
 
-
-    # Return both results.
-    return hash_valid, signature_valid
+    # Return both verification results.
+    return (
+        hash_valid,
+        signature_valid
+    )
 
 
 # ============================================================
@@ -852,12 +1087,12 @@ def verify_record(record):
 def lawyer_role():
 
     print("\n================================")
-    print("          LAWYER")
+    print("             LAWYER")
     print("================================")
 
-
     # --------------------------------------------------------
-    # STEP 1: LOAD STORED RECORD
+    # STEP 1:
+    # Load stored record.
     # --------------------------------------------------------
 
     try:
@@ -866,7 +1101,9 @@ def lawyer_role():
 
     except FileNotFoundError:
 
-        print("No stored record found.")
+        print(
+            "No stored record found."
+        )
 
         audit_log(
             "LAWYER",
@@ -876,18 +1113,22 @@ def lawyer_role():
 
         return
 
-
     # --------------------------------------------------------
-    # STEP 2: VERIFY HASH + SIGNATURE
+    # STEP 2:
+    # Verify SHA-256 and ElGamal signature.
     # --------------------------------------------------------
 
     hash_valid, signature_valid = verify_record(
         record
     )
 
+    # --------------------------------------------------------
+    # DISPLAY VERIFICATION RESULTS
+    # --------------------------------------------------------
 
-    # Display verification results.
-    print("\n--- VERIFICATION RESULTS ---")
+    print(
+        "\n--- VERIFICATION RESULTS ---"
+    )
 
     print(
         "SHA-256 Hash:",
@@ -899,16 +1140,22 @@ def lawyer_role():
         "VALID" if signature_valid else "INVALID"
     )
 
-
     # --------------------------------------------------------
-    # SECURITY CONDITION
-    # --------------------------------------------------------
+    # SECURITY RULE:
     #
-    # Lawyer can decrypt ONLY if BOTH checks succeed.
+    # Lawyer can decrypt ONLY when BOTH checks succeed.
     #
     #       hash_valid AND signature_valid
     #
-    if not (hash_valid and signature_valid):
+    # If even one fails:
+    #
+    #       NO DECRYPTION
+    # --------------------------------------------------------
+
+    if not (
+        hash_valid and
+        signature_valid
+    ):
 
         print(
             "\nACCESS DENIED."
@@ -918,7 +1165,6 @@ def lawyer_role():
             "Plaintext will NOT be decrypted."
         )
 
-
         audit_log(
             "LAWYER",
             "ACCESS",
@@ -927,29 +1173,35 @@ def lawyer_role():
 
         return
 
+    # --------------------------------------------------------
+    # STEP 3:
+    # Ask for DES key.
+    #
+    # Notice that this happens ONLY after successful
+    # integrity and signature verification.
+    # --------------------------------------------------------
 
-    # --------------------------------------------------------
-    # STEP 3: ASK FOR DES KEY
-    # --------------------------------------------------------
-    #
-    # Only after successful verification do we request the
-    # decryption key.
-    #
     des_key = get_des_key()
 
+    # --------------------------------------------------------
+    # Recover ciphertext.
+    # --------------------------------------------------------
 
-    # Recover ciphertext and IV.
     ciphertext = bytes.fromhex(
         record["ciphertext"]
     )
+
+    # --------------------------------------------------------
+    # Recover IV.
+    # --------------------------------------------------------
 
     iv = bytes.fromhex(
         record["iv"]
     )
 
-
     # --------------------------------------------------------
-    # STEP 4: DECRYPT
+    # STEP 4:
+    # Decrypt.
     # --------------------------------------------------------
 
     try:
@@ -960,28 +1212,40 @@ def lawyer_role():
             iv
         )
 
+        # ----------------------------------------------------
+        # Display plaintext.
+        # ----------------------------------------------------
 
-        # Display recovered record.
-        print("\n--- DECRYPTED CLIENT RECORD ---")
-        print(plaintext)
+        print(
+            "\n--- DECRYPTED CLIENT RECORD ---"
+        )
 
+        print(
+            plaintext
+        )
 
+        # ----------------------------------------------------
         # Record successful access.
+        # ----------------------------------------------------
+
         audit_log(
             "LAWYER",
             "ACCESS",
             "SUCCESS"
         )
 
-
     except Exception:
 
-        # Wrong DES key or corrupted ciphertext can cause
-        # decryption/padding failure.
+        # Wrong key or corrupted ciphertext can cause
+        # padding/decryption failure.
+
         print(
             "\nDecryption failed."
         )
 
+        print(
+            "Check whether the correct DES key was entered."
+        )
 
         audit_log(
             "LAWYER",
@@ -1000,9 +1264,9 @@ def compliance_role():
     print("       COMPLIANCE OFFICER")
     print("================================")
 
-
     # --------------------------------------------------------
-    # STEP 1: LOAD STORED RECORD
+    # STEP 1:
+    # Load encrypted record.
     # --------------------------------------------------------
 
     try:
@@ -1011,7 +1275,9 @@ def compliance_role():
 
     except FileNotFoundError:
 
-        print("No stored record found.")
+        print(
+            "No stored record found."
+        )
 
         audit_log(
             "COMPLIANCE",
@@ -1021,24 +1287,22 @@ def compliance_role():
 
         return
 
+    # --------------------------------------------------------
+    # STEP 2:
+    # Verify SHA-256 and ElGamal signature.
+    # --------------------------------------------------------
 
-    # --------------------------------------------------------
-    # STEP 2: VERIFY HASH + SIGNATURE
-    # --------------------------------------------------------
-    #
-    # The Compliance Officer performs exactly the same
-    # security verification.
-    #
     hash_valid, signature_valid = verify_record(
         record
     )
 
-
     # --------------------------------------------------------
-    # STEP 3: DISPLAY RESULTS
+    # DISPLAY VERIFICATION RESULTS
     # --------------------------------------------------------
 
-    print("\n--- COMPLIANCE VERIFICATION ---")
+    print(
+        "\n--- COMPLIANCE VERIFICATION ---"
+    )
 
     print(
         "SHA-256 Hash:",
@@ -1050,48 +1314,62 @@ def compliance_role():
         "VALID" if signature_valid else "INVALID"
     )
 
-
     # --------------------------------------------------------
     # IMPORTANT:
     #
-    # Compliance Officer NEVER receives the DES key.
+    # The Compliance Officer NEVER gets the DES key.
     #
-    # Therefore this function contains NO decryption code.
+    # Therefore:
+    #
+    #       No DES decryption
+    #       No plaintext
     #
     # This implements role-based access control.
     # --------------------------------------------------------
 
-
     # --------------------------------------------------------
-    # STEP 4: GENERATE COMPLIANCE REPORT
+    # STEP 3:
+    # Generate compliance report timestamp.
     # --------------------------------------------------------
 
     timestamp = datetime.now().strftime(
         "%Y-%m-%d %H:%M:%S"
     )
 
+    # --------------------------------------------------------
+    # STEP 4:
+    # Create compliance report.
+    # --------------------------------------------------------
 
     report = {
 
-        "report_timestamp": timestamp,
+        "report_timestamp":
+            timestamp,
 
-        "record_timestamp": record["timestamp"],
+        "record_timestamp":
+            record["timestamp"],
 
         "sha256_verification":
-            "VALID" if hash_valid else "INVALID",
+            "VALID"
+            if hash_valid
+            else "INVALID",
 
         "elgamal_verification":
-            "VALID" if signature_valid else "INVALID",
+            "VALID"
+            if signature_valid
+            else "INVALID",
 
-        # Compliance officer can see security metadata,
-        # but not plaintext.
-        "plaintext_access": "NOT PERMITTED"
+        "plaintext_access":
+            "NOT PERMITTED"
     }
 
+    # --------------------------------------------------------
+    # STEP 5:
+    # Save compliance report.
+    # --------------------------------------------------------
 
-    # Save report.
     with open(
-        "compliance_report.json",
+        COMPLIANCE_FILE,
         "w"
     ) as file:
 
@@ -1101,9 +1379,13 @@ def compliance_role():
             indent=4
         )
 
+    # --------------------------------------------------------
+    # DISPLAY COMPLIANCE REPORT
+    # --------------------------------------------------------
 
-    # Display report.
-    print("\n--- COMPLIANCE REPORT ---")
+    print(
+        "\n--- COMPLIANCE REPORT ---"
+    )
 
     print(
         json.dumps(
@@ -1112,8 +1394,10 @@ def compliance_role():
         )
     )
 
+    # --------------------------------------------------------
+    # Record audit operation.
+    # --------------------------------------------------------
 
-    # Audit operation.
     audit_log(
         "COMPLIANCE",
         "AUDIT",
@@ -1127,55 +1411,92 @@ def compliance_role():
 
 def main():
 
-    print("\n======================================")
-    print("          SECUREVAULT")
-    print("   Secure Record Management System")
-    print("======================================")
+    # --------------------------------------------------------
+    # PROGRAM HEADER
+    # --------------------------------------------------------
 
+    print(
+        "\n======================================"
+    )
+
+    print(
+        "          SECUREVAULT"
+    )
+
+    print(
+        "   Secure Record Management System"
+    )
+
+    print(
+        "======================================"
+    )
 
     # --------------------------------------------------------
     # Generate client's ElGamal key pair.
+    #
+    # IMPORTANT:
+    #
+    # This happens once when the application starts.
+    # --------------------------------------------------------
+
+    client_keys = generate_elgamal_keys()
+
+    # --------------------------------------------------------
+    # Separate private/public information.
     #
     # Private key:
     #
     #       x
     #
-    # Public key:
+    # Public information:
     #
-    #       (p, g, y)
-    #
-    # The client keeps the private key.
+    #       p, g, y
     # --------------------------------------------------------
-
-    client_keys = generate_elgamal_keys()
-
 
     private_key = {
-        "p": client_keys["p"],
-        "g": client_keys["g"],
-        "x": client_keys["x"],
-        "y": client_keys["y"]
+
+        "p":
+            client_keys["p"],
+
+        "g":
+            client_keys["g"],
+
+        "x":
+            client_keys["x"],
+
+        "y":
+            client_keys["y"]
     }
 
-
-    # --------------------------------------------------------
-    # ROLE MENU
-    # --------------------------------------------------------
+    # ========================================================
+    #                    ROLE MENU
+    # ========================================================
 
     while True:
 
-        print("\n--------------- MENU ---------------")
+        print(
+            "\n--------------- MENU ---------------"
+        )
 
-        print("1. Client")
-        print("2. Lawyer")
-        print("3. Compliance Officer")
-        print("4. Exit")
+        print(
+            "1. Client"
+        )
 
+        print(
+            "2. Lawyer"
+        )
+
+        print(
+            "3. Compliance Officer"
+        )
+
+        print(
+            "4. Exit"
+        )
 
         choice = input(
             "\nEnter choice: "
         )
-
 
         # ----------------------------------------------------
         # CLIENT
@@ -1183,8 +1504,9 @@ def main():
 
         if choice == "1":
 
-            client_role(private_key)
-
+            client_role(
+                private_key
+            )
 
         # ----------------------------------------------------
         # LAWYER
@@ -1194,7 +1516,6 @@ def main():
 
             lawyer_role()
 
-
         # ----------------------------------------------------
         # COMPLIANCE OFFICER
         # ----------------------------------------------------
@@ -1202,7 +1523,6 @@ def main():
         elif choice == "3":
 
             compliance_role()
-
 
         # ----------------------------------------------------
         # EXIT
@@ -1216,11 +1536,14 @@ def main():
 
             break
 
+        # ----------------------------------------------------
+        # INVALID INPUT
+        # ----------------------------------------------------
 
         else:
 
             print(
-                "Invalid choice."
+                "\nInvalid choice. Please try again."
             )
 
 
