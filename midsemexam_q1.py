@@ -1,3 +1,62 @@
+'''
+SecureVault – Secure Record Management System
+
+Design and implement an application named "SecureVault" for securely storing, authenticating, accessing, and auditing confidential client records. 
+The application must have three roles: Client, Lawyer, and Compliance Officer.
+The application must use:
+1. DES in CBC mode for encryption and decryption.
+2. SHA-256 for data integrity verification.
+3. ElGamal Digital Signature for authentication and verification.
+
+CLIENT:
+
+The Client should:
+1. Enter/provide a confidential record.
+2. Encrypt the record using DES in CBC mode.
+3. Generate an IV and use it during encryption.
+4. Calculate the SHA-256 hash of the encrypted data.
+5. Generate an ElGamal digital signature using the client's private key.
+6. Display the following:
+- Ciphertext
+- IV
+- SHA-256 hash value
+- ElGamal signature
+- Timestamp
+7. Store the ciphertext, IV, hash value, signature, and timestamp in a file for future verification and access.
+
+LAWYER:
+
+The Lawyer should:
+1. Read the stored ciphertext, IV, hash value, signature, and timestamp from the file.
+2. Recalculate the SHA-256 hash and compare it with the stored hash value.
+3. Verify the ElGamal digital signature using the client's public key.
+4. Display the hash verification and signature verification status.
+5. Only if the hash and signature verification are successful, decrypt the ciphertext using DES in CBC mode.
+6. Display the recovered plaintext record.
+7. Store the verification/access status along with a timestamp.
+
+If the integrity or signature verification fails, the Lawyer must not decrypt or access the plaintext.
+
+COMPLIANCE OFFICER:
+
+The Compliance Officer should:
+1. Access the stored encrypted record and its associated security metadata.
+2. Verify the SHA-256 hash to check whether the stored data has been modified.
+3. Verify the ElGamal digital signature using the client's public key.
+4. Display the hash verification and signature verification status.
+5. Record the verification results along with a timestamp.
+6. Generate a Compliance Report containing the verification status and relevant metadata.
+7. The Compliance Officer must NOT decrypt the ciphertext or access the client's plaintext record.
+
+The application should maintain proper role-based access, ensuring that:
+- The Client can create and securely store records.
+- The Lawyer can verify and decrypt records after successful authentication.
+- The Compliance Officer can independently audit the record's integrity and authenticity without accessing the plaintext.
+
+The system should clearly display all relevant security information and verification results.
+
+'''
+
 import json
 import math
 import secrets
