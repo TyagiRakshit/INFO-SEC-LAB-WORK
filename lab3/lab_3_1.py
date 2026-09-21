@@ -1,102 +1,299 @@
-# RSA Encryption and Decryption from First Principles
-# Encrypts text using Public Key (n, e) and Decrypts using Private Key (n, d)
-# Standard library only (no external packages required)
+# ============================================================
+# RSA ENCRYPTION AND DECRYPTION
+# From First Principles - Standard Python Only
+#
+# RSA:
+#   Public Key  = (n, e)
+#   Private Key = (n, d)
+#
+# Encryption:
+#   C = M^e mod n
+#
+# Decryption:
+#   M = C^d mod n
+#
+# ============================================================
 
 import math
 
 
-def egcd(a, b):
-    """Extended Euclidean Algorithm to find greatest common divisor."""
-    if a == 0:
-        return (b, 0, 1)
-    g, y, x = egcd(b % a, a)
-    return (g, x - (b // a) * y, y)
+# ============================================================
+# 1. EXTENDED EUCLIDEAN ALGORITHM
+# ============================================================
+# Used to find the modular inverse of e.
+#
+# We need:
+#
+#       e * d ≡ 1 (mod phi)
+#
+# Therefore:
+#
+#       d = inverse of e modulo phi
+#
+# ============================================================
 
+def egcd(a, b):
+
+    if b == 0:
+        return a, 1, 0
+
+    gcd, x1, y1 = egcd(b, a % b)
+
+    x = y1
+    y = x1 - (a // b) * y1
+
+    return gcd, x, y
+
+
+# ============================================================
+# 2. MODULAR INVERSE
+# ============================================================
+# Finds d such that:
+#
+#       (e * d) % phi = 1
+#
+# This gives the RSA private exponent d.
+# ============================================================
 
 def mod_inverse(e, phi):
-    """Calculates modular multiplicative inverse d = e^-1 mod phi."""
-    g, x, _ = egcd(e, phi)
-    if g != 1:
-        raise ValueError("Modular inverse does not exist; 'e' and 'phi' must be coprime.")
+
+    gcd, x, _ = egcd(e, phi)
+
+    if gcd != 1:
+        raise ValueError("e and phi must be coprime")
+
     return x % phi
 
 
-def generate_keypair(p, q, e=65537):
-    """Generates RSA Public (n, e) and Private (n, d) keys from primes p and q."""
-    if p == q:
-        raise ValueError("Primes p and q cannot be equal.")
+# ============================================================
+# 3. RSA KEY GENERATION
+# ============================================================
+#
+# Input:
+#       p, q = prime numbers
+#       e    = public exponent
+#
+# Calculate:
+#
+#       n   = p * q
+#       phi = (p-1) * (q-1)
+#       d   = e^-1 mod phi
+#
+# Public Key:
+#       (n, e)
+#
+# Private Key:
+#       (n, d)
+# ============================================================
+
+def generate_keys(p, q, e):
 
     n = p * q
+
     phi = (p - 1) * (q - 1)
 
+    # e must be relatively prime to phi
     if math.gcd(e, phi) != 1:
-        for candidate in range(3, phi, 2):
-            if math.gcd(candidate, phi) == 1:
-                e = candidate
-                break
+        raise ValueError("e and phi(n) must be coprime")
 
     d = mod_inverse(e, phi)
-    return (n, e), (n, d), phi
+
+    public_key = (n, e)
+    private_key = (n, d)
+
+    return public_key, private_key
 
 
-def rsa_encrypt(plaintext, public_key):
-    """Encrypts characters by converting each letter to ASCII and computing C = M^e mod n."""
+# ============================================================
+# 4. RSA ENCRYPTION
+# ============================================================
+#
+# For every character:
+#
+#       M = ASCII value of character
+#
+#       C = M^e mod n
+#
+# ============================================================
+
+def encrypt(text, public_key):
+
     n, e = public_key
-    ciphertext_blocks = []
 
-    for char in plaintext:
+    ciphertext = []
+
+    for char in text:
+
+        # Convert character → number
         m = ord(char)
+
+        # RSA requires M < n
         if m >= n:
             raise ValueError(
-                f"Character '{char}' ASCII ({m}) is larger than modulus n ({n}). Use larger prime numbers.")
+                "n is too small for this character. "
+                "Choose larger p and q."
+            )
+
+        # C = M^e mod n
         c = pow(m, e, n)
-        ciphertext_blocks.append(c)
 
-    return ciphertext_blocks
+        ciphertext.append(c)
+
+    return ciphertext
 
 
-def rsa_decrypt(ciphertext_blocks, private_key):
+# ============================================================
+# 5. RSA DECRYPTION
+# ============================================================
+#
+# For every ciphertext number:
+#
+#       M = C^d mod n
+#
+# Then convert number → character.
+#
+# ============================================================
+
+def decrypt(ciphertext, private_key):
+
     n, d = private_key
-    decrypted_chars = []
 
-    for c in ciphertext_blocks:
-        m = pow(c, d, n)  # Efficient modular exponentiation: (c^d) % n
-        decrypted_chars.append(chr(m))
+    plaintext = ""
 
-    return "".join(decrypted_chars)
+    for c in ciphertext:
 
+        # M = C^d mod n
+        m = pow(c, d, n)
 
+        # Convert number → character
+        plaintext += chr(m)
 
-
-print("=== RSA Encryption / Decryption ===")
-
-plaintext_input = input("Enter plain text: ")
-
-p = int(input("Enter prime number p : "))
-q = int(input("Enter prime number q : "))
-e_input = input("Enter public exponent e: ")
-
-e = int(e_input) if e_input.strip() else 65537
-
-public_key, private_key, phi = generate_keypair(p, q, e)
-n, e = public_key
-_, d = private_key
-
-cipher_blocks = rsa_encrypt(plaintext_input, public_key)
-
-decrypted_text = rsa_decrypt(cipher_blocks, private_key)
-
-print("\n--- RSA PARAMETERS & KEYS ---")
-print(f"p                : {p}")
-print(f"q                : {q}")
-print(f"Modulus (n)      : {n}")
-print(f"Totient phi(n)   : {phi}")
-print(f"Public Key (n,e) : ({n}, {e})")
-print(f"Private Key(n,d) : ({n}, {d})")
-
-print("\n--- RESULTS ---")
-print(f"Plaintext        : {plaintext_input}")
-print(f"Ciphertext Array : {cipher_blocks}")
-print(f"Decrypted Text   : {decrypted_text}")
+    return plaintext
 
 
+# ============================================================
+# MAIN PROGRAM
+# ============================================================
+
+print("========== RSA ==========")
+
+# ------------------------------------------------------------
+# SCENARIO VARIATION 1:
+#
+# If the question says:
+# "Generate RSA keys..."
+#
+# Then take p, q and e and call generate_keys().
+# ------------------------------------------------------------
+
+p = int(input("Enter prime p: "))
+q = int(input("Enter prime q: "))
+
+# Common classroom choice:
+# e = 65537
+#
+# BUT:
+# For small p and q, 65537 may be larger than phi(n).
+# In such lab questions, use a suitable e given by the
+# question or choose a valid small value.
+#
+# Example:
+# p = 5, q = 11
+# phi = 40
+# e = 3 works because gcd(3,40) = 1.
+
+e = int(input("Enter e: "))
+
+public_key, private_key = generate_keys(p, q, e)
+
+print("\nPublic Key :", public_key)
+print("Private Key:", private_key)
+
+
+# ------------------------------------------------------------
+# SCENARIO VARIATION 2:
+#
+# If the question gives:
+#
+#       n, e, d
+#
+# directly,
+#
+# DO NOT generate new keys.
+#
+# Instead use:
+#
+# public_key = (n, e)
+# private_key = (n, d)
+#
+# Example:
+#
+# n = 323
+# e = 5
+# d = 173
+#
+# public_key = (323, 5)
+# private_key = (323, 173)
+# ------------------------------------------------------------
+
+
+# ------------------------------------------------------------
+# MESSAGE
+#
+# This is the ONLY part that normally changes when the
+# real-world scenario changes.
+#
+# Example lab message:
+# "Asymmetric Encryption"
+#
+# Other possible exam scenarios:
+#
+# "Bank Transaction"
+# "Patient Record"
+# "Secure File"
+# "Transaction ID"
+#
+# The RSA encryption/decryption functions remain the same.
+# ------------------------------------------------------------
+
+message = input("Enter message: ")
+
+
+# ------------------------------------------------------------
+# ENCRYPT
+# ------------------------------------------------------------
+
+ciphertext = encrypt(message, public_key)
+
+
+# ------------------------------------------------------------
+# DECRYPT
+# ------------------------------------------------------------
+
+decrypted_message = decrypt(ciphertext, private_key)
+
+
+# ------------------------------------------------------------
+# OUTPUT
+# ------------------------------------------------------------
+
+print("\n========== RESULT ==========")
+
+print("Plaintext :", message)
+
+print("Ciphertext:", ciphertext)
+
+print("Decrypted :", decrypted_message)
+
+
+# ------------------------------------------------------------
+# VERIFY
+#
+# Useful when the question says:
+# "Verify that the original message is recovered."
+# ------------------------------------------------------------
+
+if message == decrypted_message:
+    print("Verification: SUCCESS")
+else:
+    print("Verification: FAILED")
