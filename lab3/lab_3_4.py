@@ -1,186 +1,338 @@
-import os
-import time
 from Crypto.PublicKey import RSA, ECC
 from Crypto.Cipher import PKCS1_OAEP, AES
 from Crypto.Protocol.DH import key_agreement
 from Crypto.Hash import SHA256
 from Crypto.Random import get_random_bytes
 
-# ---------------- KEY GENERATION ----------------
 
-print("--- 1. KEY GENERATION ---")
+# ============================================================
+# 1. RSA KEY GENERATION
+# ============================================================
 
-# RSA 2048-bit Key Generation
-start = time.perf_counter()
-rsa_priv = RSA.generate(2048)
-rsa_keygen_time = time.perf_counter() - start
-rsa_pub = rsa_priv.public_key()
+def generate_rsa_keys():
+    # Q4 specifically says RSA 2048-bit
+    # If the question gives another size, change 2048.
+    private_key = RSA.generate(2048)
 
-# ECC secp256r1 Key Generation
-start = time.perf_counter()
-ecc_priv = ECC.generate(curve="P-256")
-ecc_keygen_time = time.perf_counter() - start
-ecc_pub = ecc_priv.public_key()
+    # Public key is obtained from private key
+    public_key = private_key.public_key()
 
-print(f"RSA-2048 KeyGen Time : {rsa_keygen_time * 1e3:.2f} ms")
-print(f"ECC-P256 KeyGen Time : {ecc_keygen_time * 1e3:.2f} ms\n")
+    return private_key, public_key
 
 
-# ---------------- RSA HYBRID FILE TRANSFER ----------------
+# ============================================================
+# 2. RSA HYBRID FILE ENCRYPTION
+# ============================================================
 
-def rsa_encrypt_file(file_bytes, public_key):
-    # Encrypt AES session key using RSA-OAEP
-    session_key = get_random_bytes(32)  # AES-256 key
+def rsa_encrypt_file(data, public_key):
+
+    # --------------------------------------------------------
+    # Generate a random AES-256 session key
+    # --------------------------------------------------------
+    # AES encrypts the ACTUAL FILE.
+    #
+    # Why not encrypt the entire file using RSA?
+    # RSA is not designed for large data/files.
+    # Therefore:
+    #
+    #       File ----AES----> Ciphertext
+    #                    ^
+    #                    |
+    #              AES session key
+    #                    ^
+    #                    |
+    #             RSA encrypts key
+    #
+    # --------------------------------------------------------
+
+    session_key = get_random_bytes(32)     # 32 bytes = 256 bits
+
+
+    # --------------------------------------------------------
+    # Encrypt AES session key using RSA PUBLIC KEY
+    # --------------------------------------------------------
+
     rsa_cipher = PKCS1_OAEP.new(public_key)
-    enc_session_key = rsa_cipher.encrypt(session_key)
 
-    # Encrypt payload using AES-GCM
-    nonce = get_random_bytes(12)
-    aes_cipher = AES.new(session_key, AES.MODE_GCM, nonce=nonce)
-    ciphertext, tag = aes_cipher.encrypt_and_digest(file_bytes)
+    encrypted_session_key = rsa_cipher.encrypt(session_key)
 
-    return enc_session_key, nonce, tag, ciphertext
 
-#def rsa_encrypt_file(data, public_key):
-
-    # Generate random 256-bit AES session key
-
-    #session_key = get_random_bytes(32)
-
-    # Encrypt AES key using RSA public key
-
-    #rsa_cipher = PKCS1_OAEP.new(public_key)
-
-    #encrypted_session_key = rsa_cipher.encrypt(session_key)
-
+    # --------------------------------------------------------
     # Encrypt actual file using AES-GCM
+    # --------------------------------------------------------
 
-   # aes_cipher = AES.new(session_key, AES.MODE_GCM)
+    # 12-byte nonce is commonly used with GCM
+    nonce = get_random_bytes(12)
 
-    #ciphertext, tag = aes_cipher.encrypt_and_digest(data)
+    aes_cipher = AES.new(
+        session_key,
+        AES.MODE_GCM,
+        nonce=nonce
+    )
 
-   # return encrypted_session_key, aes_cipher.nonce, tag, ciphertext
+    ciphertext, tag = aes_cipher.encrypt_and_digest(data)
 
 
-def rsa_decrypt_file(enc_session_key, nonce, tag, ciphertext, private_key):
-    # Decrypt AES session key using RSA private key
+    # Return everything receiver needs
+    return encrypted_session_key, nonce, tag, ciphertext
+
+
+# ============================================================
+# 3. RSA FILE DECRYPTION
+# ============================================================
+
+def rsa_decrypt_file(
+        encrypted_session_key,
+        nonce,
+        tag,
+        ciphertext,
+        private_key):
+
+    # --------------------------------------------------------
+    # Recover AES session key using RSA PRIVATE KEY
+    # --------------------------------------------------------
+
     rsa_cipher = PKCS1_OAEP.new(private_key)
-    session_key = rsa_cipher.decrypt(enc_session_key)
 
-    # Decrypt payload using AES-GCM
-    aes_cipher = AES.new(session_key, AES.MODE_GCM, nonce=nonce)
-    return aes_cipher.decrypt_and_verify(ciphertext, tag)
+    session_key = rsa_cipher.decrypt(
+        encrypted_session_key
+    )
 
 
-# ---------------- ECC (ECDH) HYBRID FILE TRANSFER ----------------
+    # --------------------------------------------------------
+    # Decrypt the actual file using AES
+    # --------------------------------------------------------
+
+    aes_cipher = AES.new(
+        session_key,
+        AES.MODE_GCM,
+        nonce=nonce
+    )
+
+    plaintext = aes_cipher.decrypt_and_verify(
+        ciphertext,
+        tag
+    )
+
+    return plaintext
+
+
+# ============================================================
+# 4. ECC KEY GENERATION
+# ============================================================
+
+def generate_ecc_keys():
+
+    # Q4 specifies secp256r1.
+    #
+    # In PyCryptodome:
+    # secp256r1 = P-256
+    #
+    # If the question specifies another supported curve,
+    # change "P-256" accordingly.
+
+    private_key = ECC.generate(
+        curve="P-256"
+    )
+
+    public_key = private_key.public_key()
+
+    return private_key, public_key
+
+
+# ============================================================
+# 5. SHA-256 KDF
+# ============================================================
 
 def kdf(shared_secret):
+
+    # ECDH produces a shared secret.
+    # SHA-256 converts that shared secret into
+    # a usable AES key.
+
     return SHA256.new(shared_secret).digest()
 
 
-def ecc_encrypt_file(file_bytes, recipient_pub_key):
-    # Ephemeral key pair generation for ECDH
-    ephemeral_priv = ECC.generate(curve="P-256")
-    ephemeral_pub = ephemeral_priv.public_key()
+# ============================================================
+# 6. ECC HYBRID FILE ENCRYPTION
+# ============================================================
 
-    # Shared secret derivation via ECDH
+def ecc_encrypt_file(data, receiver_public_key):
+
+    # --------------------------------------------------------
+    # Generate temporary / ephemeral ECC key pair
+    # --------------------------------------------------------
+    #
+    # Sender creates a new ECC key pair for this transfer.
+    #
+    # sender_private  -> kept secret
+    # sender_public   -> sent to receiver
+    #
+    # --------------------------------------------------------
+
+    ephemeral_private = ECC.generate(
+        curve="P-256"
+    )
+
+    ephemeral_public = ephemeral_private.public_key()
+
+
+    # --------------------------------------------------------
+    # ECDH KEY AGREEMENT
+    # --------------------------------------------------------
+    #
+    # Sender:
+    #
+    #     sender private key
+    #              +
+    #     receiver public key
+    #              |
+    #              v
+    #        shared secret
+    #
+    # Receiver will independently calculate the SAME
+    # shared secret using:
+    #
+    #     receiver private key
+    #              +
+    #     sender ephemeral public key
+    #
+    # --------------------------------------------------------
+
     session_key = key_agreement(
-        static_priv=ephemeral_priv,
-        static_pub=recipient_pub_key,
+        static_priv=ephemeral_private,
+        static_pub=receiver_public_key,
         kdf=kdf
     )
 
-    # Encrypt payload using AES-GCM
+
+    # --------------------------------------------------------
+    # Encrypt actual file using AES-GCM
+    # --------------------------------------------------------
+
     nonce = get_random_bytes(12)
-    aes_cipher = AES.new(session_key, AES.MODE_GCM, nonce=nonce)
-    ciphertext, tag = aes_cipher.encrypt_and_digest(file_bytes)
 
-    return ephemeral_pub, nonce, tag, ciphertext
+    aes_cipher = AES.new(
+        session_key,
+        AES.MODE_GCM,
+        nonce=nonce
+    )
+
+    ciphertext, tag = aes_cipher.encrypt_and_digest(data)
 
 
-def ecc_decrypt_file(ephemeral_pub, nonce, tag, ciphertext, recipient_priv_key):
-    # Recipient derives same shared secret using ephemeral public key
+    # Receiver needs the ephemeral public key,
+    # nonce, tag and ciphertext.
+    return ephemeral_public, nonce, tag, ciphertext
+
+
+# ============================================================
+# 7. ECC FILE DECRYPTION
+# ============================================================
+
+def ecc_decrypt_file(
+        ephemeral_public,
+        nonce,
+        tag,
+        ciphertext,
+        receiver_private_key):
+
+    # --------------------------------------------------------
+    # Receiver calculates the SAME shared secret
+    # --------------------------------------------------------
+
     session_key = key_agreement(
-        static_priv=recipient_priv_key,
-        static_pub=ephemeral_pub,
+        static_priv=receiver_private_key,
+        static_pub=ephemeral_public,
         kdf=kdf
     )
 
-    # Decrypt payload using AES-GCM
-    aes_cipher = AES.new(session_key, AES.MODE_GCM, nonce=nonce)
-    return aes_cipher.decrypt_and_verify(ciphertext, tag)
+
+    # --------------------------------------------------------
+    # Decrypt actual file using AES-GCM
+    # --------------------------------------------------------
+
+    aes_cipher = AES.new(
+        session_key,
+        AES.MODE_GCM,
+        nonce=nonce
+    )
+
+    plaintext = aes_cipher.decrypt_and_verify(
+        ciphertext,
+        tag
+    )
+
+    return plaintext
 
 
-# ---------------- BENCHMARKING ----------------
+# ============================================================
+# MAIN PROGRAM
+# ============================================================
 
-#print("\n========== FILE INPUT ==========")
+# ------------------------------------------------------------
+# STEP 1: Generate RSA keys
+# ------------------------------------------------------------
 
-#filename = input("Enter .txt file name: ")
+rsa_private, rsa_public = generate_rsa_keys()
 
-#with open(filename, "rb") as file:
 
-    #data = file.read()
+# ------------------------------------------------------------
+# STEP 2: Generate ECC keys
+# ------------------------------------------------------------
 
-#file_size = len(data)
+ecc_private, ecc_public = generate_ecc_keys()
 
-#print(f"File Name : {filename}")
 
-#print(f"File Size : {file_size / (1024 * 1024):.2f} MB")
+# ------------------------------------------------------------
+# STEP 3: Read the file
+# ------------------------------------------------------------
 
-file_sizes = [1, 10]  # MB
+filename = input("Enter file name: ")
 
-print("--- 2. FILE ENCRYPTION & DECRYPTION BENCHMARK ---")
-for size in file_sizes:
-    print(f"\n[ Testing File Size: {size} MB ]")
-    data = os.urandom(size * 1024 * 1024)
+with open(filename, "rb") as file:
+    data = file.read()
 
-    # Benchmark RSA Hybrid
-    t0 = time.perf_counter()
-    rsa_enc_data = rsa_encrypt_file(data, rsa_pub)
-    rsa_enc_time = time.perf_counter() - t0
 
-    t0 = time.perf_counter()
-    rsa_dec_data = rsa_decrypt_file(*rsa_enc_data, rsa_priv)
-    rsa_dec_time = time.perf_counter() - t0
-    assert rsa_dec_data == data, "RSA File Decryption Failed!"
+# ============================================================
+# RSA FILE TRANSFER
+# ============================================================
 
-    # Benchmark ECC Hybrid
-    t0 = time.perf_counter()
-    ecc_enc_data = ecc_encrypt_file(data, ecc_pub)
-    ecc_enc_time = time.perf_counter() - t0
+print("\n========== RSA FILE TRANSFER ==========")
 
-    t0 = time.perf_counter()
-    ecc_dec_data = ecc_decrypt_file(*ecc_enc_data, ecc_priv)
-    ecc_dec_time = time.perf_counter() - t0
-    assert ecc_dec_data == data, "ECC File Decryption Failed!"
+# Sender encrypts the file using receiver's RSA public key
+rsa_encrypted = rsa_encrypt_file(
+    data,
+    rsa_public
+)
 
-    print(f"RSA-2048 Encrypt Time : {rsa_enc_time * 1e3:.2f} ms | Decrypt Time : {rsa_dec_time * 1e3:.2f} ms")
-    print(f"ECC-P256 Encrypt Time : {ecc_enc_time * 1e3:.2f} ms | Decrypt Time : {ecc_dec_time * 1e3:.2f} ms")
+# Receiver decrypts using RSA private key
+rsa_decrypted = rsa_decrypt_file(
+    *rsa_encrypted,
+    rsa_private
+)
 
-#message.txt
-#========== KEY GENERATION ==========
-#RSA-2048 KeyGen Time : 126.48 ms
-#ECC-P256 KeyGen Time : 2.91 ms
+print("RSA Decryption:", "SUCCESS" if rsa_decrypted == data else "FAILED")
 
-#========== FILE INPUT ==========
-#Enter .txt file name: message.txt
-#File Name : message.txt
-#File Size : 0.00 MB
 
-#========== RSA-2048 ==========
-#Encryption Time : 1.42 ms
-#Decryption Time : 0.88 ms
-#Verification    : SUCCESS
+# ============================================================
+# ECC FILE TRANSFER
+# ============================================================
 
-#========== ECC-P256 ==========
-#Encryption Time : 1.36 ms
-#Decryption Time : 0.72 ms
-#Verification    : SUCCESS
+print("\n========== ECC FILE TRANSFER ==========")
 
-#========== PERFORMANCE COMPARISON ==========
-#File Size: 0.00 MB
+# Sender encrypts using receiver's ECC public key
+ecc_encrypted = ecc_encrypt_file(
+    data,
+    ecc_public
+)
 
-#                Encryption       Decryption
-#------------------------------------------------
-#RSA-2048            1.42 ms           0.88 ms
-#ECC-P256            1.36 ms           0.72 ms
+# Receiver decrypts using receiver's ECC private key
+ecc_decrypted = ecc_decrypt_file(
+    *ecc_encrypted,
+    ecc_private
+)
+
+print("ECC Decryption:", "SUCCESS" if ecc_decrypted == data else "FAILED")
+
+
