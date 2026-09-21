@@ -1,3 +1,99 @@
+'''
+HealthSecure
+
+A hospital wants to develop a secure patient-information management system called HealthSecure. The system has three roles: Doctor, Nurse, and Admin.
+
+The system must ensure the confidentiality, integrity, and authenticity of patient information such as name, age,
+gender, blood group, diagnosis, and other medical details.
+
+Doctor:
+
+The Doctor should be able to:
+
+Enter patient information such as Name, Age, Gender, Blood Group, Diagnosis, etc.
+
+Store the patient information in a suitable data structure such as a list, array, dictionary, or file.
+
+Generate an RSA key pair consisting of a public key and private key.
+
+Encrypt the patient information using RSA encryption and the Doctor's RSA public key.
+
+Compute the SHA-256 hash of the encrypted patient information.
+
+Digitally sign the SHA-256 hash using the Doctor's RSA private key.
+
+Store the encrypted patient data, SHA-256 hash, digital signature, and timestamp.
+
+View previously stored patient records.
+
+Decrypt an encrypted patient record using the corresponding RSA private key.
+
+Recompute the SHA-256 hash of the encrypted data and compare it with the stored hash to verify integrity.
+
+Verify the RSA digital signature using the Doctor's public key to verify authenticity.
+
+Display the decrypted patient information only when the integrity and signature verification are successful.
+
+
+Nurse:
+
+The Nurse should be able to:
+
+View the available encrypted patient records.
+
+View the filename/record ID, encrypted data, hash, signature, and timestamp as permitted.
+
+Must not be allowed to decrypt or view the plaintext patient information.
+
+Recompute the SHA-256 hash of the encrypted data and compare it with the stored hash to verify data integrity.
+
+Verify the Doctor's RSA digital signature using the Doctor's public key to verify authenticity.
+
+Display the verification result along with a timestamp.
+
+The Nurse must not have access to the Doctor's private key.
+
+
+Admin:
+
+The Admin should be able to:
+
+View only the patient record ID/name, SHA-256 hash, and timestamp.
+
+Verify the Doctor's RSA digital signature using the Doctor's public key.
+
+Display whether the digital signature is VALID or INVALID.
+
+The Admin must not be allowed to decrypt or view the plaintext patient information.
+
+The Admin must not have access to the Doctor's private key.
+
+
+Task:
+
+Develop a menu-driven Python program implementing the above requirements using:
+
+RSA asymmetric encryption and decryption
+
+RSA public and private keys
+
+SHA-256 hashing
+
+RSA digital signatures
+
+Role-Based Access Control (RBAC)
+
+Patient data handling using lists, dictionaries, arrays, or files
+
+Timestamps
+
+Secure storage of encrypted records, hashes, signatures, and other required information
+
+Appropriate access restrictions for Doctor, Nurse, and Admin
+
+The program should ensure that each role can perform only its authorized operations and that patient information remains
+confidential while its integrity and authenticity can be verified.
+'''
 import json
 from datetime import datetime
 
