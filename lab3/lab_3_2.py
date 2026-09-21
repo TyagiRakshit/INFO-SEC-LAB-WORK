@@ -1,56 +1,292 @@
+# ============================================================
+# ECC + AES HYBRID ENCRYPTION
+# ============================================================
+#
+# IMPORTANT:
+#
+# ECC is NOT directly encrypting the message here.
+#
+# ECC:
+#     Establishes a shared secret
+#
+# SHA-256:
+#     Converts the shared secret into an AES key
+#
+# AES:
+#     Actually encrypts the message
+#
+# Overall:
+#
+#       ECC
+#        ↓
+#   Shared Secret
+#        ↓
+#      SHA-256
+#        ↓
+#     AES Key
+#        ↓
+#      AES-EAX
+#        ↓
+#     Ciphertext
+#
+# ============================================================
+
+
 from Crypto.PublicKey import ECC
 from Crypto.Protocol.DH import key_agreement
 from Crypto.Hash import SHA256
 from Crypto.Cipher import AES
 
 
+# ============================================================
+# 1. MESSAGE
+# ============================================================
+#
+# The actual data that we want to protect.
+#
+# b"" means the message is stored as BYTES.
+#
+# AES works with bytes.
+#
+# ------------------------------------------------------------
+# EXAM VARIATION:
+#
+# If the question gives:
+#
+#     "Secure Transactions"
+#
+# use:
+#
+#     message = b"Secure Transactions"
+#
+# If the question gives a different application:
+#
+#     b"Bank Transaction"
+#     b"Patient Record"
+#     b"Confidential Data"
+#
+# ONLY CHANGE THIS LINE.
+#
+# The ECC/AES code does not change.
+# ============================================================
+
 message = b"Secure Transactions"
 
 
-# Receiver's ECC keys
-private_key = ECC.generate(curve="P-256")
-public_key = private_key.public_key()
+# ============================================================
+# 2. RECEIVER GENERATES ECC KEY PAIR
+# ============================================================
+#
+# Receiver creates:
+#
+#     Private Key
+#     Public Key
+#
+# curve = P-256
+#
+# Private key:
+#     MUST remain secret.
+#
+# Public key:
+#     Can be shared with the sender.
+#
+# ============================================================
+
+receiver_private = ECC.generate(curve="P-256")
+
+receiver_public = receiver_private.public_key()
 
 
-# Sender's ECC keys
+# ============================================================
+# 3. SENDER GENERATES ECC KEY PAIR
+# ============================================================
+#
+# Sender also creates:
+#
+#     Private Key
+#     Public Key
+#
+# The private key stays with the sender.
+# The public key can be shared with the receiver.
+#
+# ============================================================
+
 sender_private = ECC.generate(curve="P-256")
+
 sender_public = sender_private.public_key()
 
 
-# Sender creates shared secret using:
-# sender private key + receiver public key
+# ============================================================
+# 4. SENDER CREATES SHARED SECRET
+# ============================================================
+#
+# Sender uses:
+#
+#     Sender's PRIVATE key
+#             +
+#     Receiver's PUBLIC key
+#
+# to calculate a shared secret.
+#
+# IMPORTANT:
+#
+# The shared secret itself is NOT sent over the network.
+#
+# ============================================================
+
 sender_secret = key_agreement(
+
     static_priv=sender_private,
-    static_pub=public_key,
-    kdf=lambda x: SHA256.new(x).digest()
+
+    static_pub=receiver_public,
+
+    # KDF = Key Derivation Function
+    #
+    # The ECC shared secret is passed through SHA-256
+    # to derive the key that will be used by AES.
+    #
+    kdf=lambda secret:
+        SHA256.new(secret).digest()
 )
 
 
-# Encrypt
-cipher = AES.new(sender_secret, AES.MODE_EAX)
+# ============================================================
+# 5. AES ENCRYPTION
+# ============================================================
+#
+# ECC gave us a shared secret.
+#
+# SHA-256 converted it into sender_secret.
+#
+# Now AES actually encrypts the message.
+#
+# EAX provides:
+#
+#     Encryption
+#     +
+#     Authentication
+#
+# ============================================================
 
+cipher = AES.new(
+    sender_secret,
+    AES.MODE_EAX
+)
+
+
+# Encrypt message and create authentication tag.
+#
+# ciphertext = encrypted message
+# tag        = used later to verify that the data
+#              was not modified.
+#
 ciphertext, tag = cipher.encrypt_and_digest(message)
 
 
-# Receiver creates the SAME shared secret using:
-# receiver private key + sender public key
+# ============================================================
+# 6. RECEIVER CREATES THE SAME SHARED SECRET
+# ============================================================
+#
+# Sender used:
+#
+#     sender private + receiver public
+#
+# Receiver uses:
+#
+#     receiver private + sender public
+#
+# Both calculations produce the SAME shared secret.
+#
+# ============================================================
+
 receiver_secret = key_agreement(
-    static_priv=private_key,
+
+    static_priv=receiver_private,
+
     static_pub=sender_public,
-    kdf=lambda x: SHA256.new(x).digest()
+
+    kdf=lambda secret:
+        SHA256.new(secret).digest()
 )
 
 
-# Decrypt
+# ============================================================
+# 7. RECEIVER CREATES AES CIPHER FOR DECRYPTION
+# ============================================================
+#
+# Receiver uses:
+#
+#     receiver_secret
+#
+# which should be identical to:
+#
+#     sender_secret
+#
+# We also need the SAME nonce used during encryption.
+#
+# cipher.nonce = nonce generated by sender's AES cipher.
+#
+# ============================================================
+
 cipher = AES.new(
+
     receiver_secret,
+
     AES.MODE_EAX,
+
     nonce=cipher.nonce
 )
 
-plaintext = cipher.decrypt_and_verify(ciphertext, tag)
 
+# ============================================================
+# 8. DECRYPT + VERIFY
+# ============================================================
+#
+# decrypt_and_verify() does TWO things:
+#
+#     1. Decrypts ciphertext
+#     2. Verifies authentication tag
+#
+# If ciphertext/tag was modified:
+#
+#     verification fails
+#
+# If everything is correct:
+#
+#     plaintext = original message
+#
+# ============================================================
+
+plaintext = cipher.decrypt_and_verify(
+    ciphertext,
+    tag
+)
+
+
+# ============================================================
+# 9. DISPLAY RESULT
+# ============================================================
+
+print("\n========== RESULT ==========")
 
 print("Original message :", message.decode())
+
 print("Ciphertext       :", ciphertext.hex())
+
 print("Decrypted message:", plaintext.decode())
+
+
+# ============================================================
+# 10. VERIFY ORIGINAL MESSAGE
+# ============================================================
+#
+# Useful when the question explicitly says:
+#
+# "Verify that the original message is recovered."
+#
+# ============================================================
+
+if plaintext == message:
+    print("Verification     : SUCCESS")
+else:
+    print("Verification     : FAILED")
