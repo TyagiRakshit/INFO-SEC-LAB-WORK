@@ -1,28 +1,28 @@
 
 # ============================================================
-# LAB 5 - CODE 2: SERVER SIDE
+# LAB 5 - CODE 2: CLIENT SIDE
 # HASHING USING SOCKET PROGRAMMING
 # ============================================================
 #
 # AIM:
-# To receive a message from the client, calculate its
-# DJB2 hash, and send the hash back to the client.
+# To send a message to the server and verify its integrity
+# by comparing the local hash with the server's hash.
 #
-# SERVER FLOW:
+# CLIENT FLOW:
 #
-# 1. Create a TCP socket.
-# 2. Bind the socket to an IP address and port.
-# 3. Listen for client connections.
-# 4. Accept a client connection.
-# 5. Receive the client's message.
-# 6. Calculate the DJB2 hash of the message.
-# 7. Send the calculated hash back to the client.
-# 8. Close the client connection.
+# 1. Take a message from the user.
+# 2. Calculate the DJB2 hash locally.
+# 3. Create a TCP socket.
+# 4. Connect to the server.
+# 5. Send the message to the server.
+# 6. Receive the hash calculated by the server.
+# 7. Compare both hash values.
+# 8. Display whether the integrity check passed.
 #
 # ============================================================
 
 
-# Import socket library for network communication
+# Import socket library
 import socket
 
 
@@ -30,159 +30,151 @@ import socket
 # STEP 1: DJB2 HASH FUNCTION
 # ============================================================
 
-# This is the SAME hashing function from Code 1.
+# Same function used in Code 1 and the server program
 
 def djb2_hash(message):
 
-    # Initial value used by DJB2
+    # Initial hash value
     hash_value = 5381
 
-    # Process each character of the message
+    # Process every character
     for char in message:
 
         # Convert character into its numeric value
         ascii_value = ord(char)
 
-        # Multiply old hash by 33 and add character value
-        #
-        # (hash_value << 5) means hash_value * 32
-        # Adding hash_value makes it hash_value * 33
-
+        # New hash = Old hash * 33 + character value
         hash_value = ((hash_value << 5) + hash_value) + ascii_value
 
-        # Keep the hash within the unsigned 32-bit range
+        # Keep only the lowest 32 bits
         hash_value = hash_value & 0xFFFFFFFF
 
     return hash_value
 
 
 # ============================================================
-# STEP 2: CREATE THE SERVER
+# STEP 2: CREATE THE CLIENT
 # ============================================================
 
-def start_server():
+def start_client():
 
-    # IP address of our computer (localhost)
+    # Server IP address
     host = "127.0.0.1"
 
-    # Port number used for communication
+    # Must be the SAME port as the server
     port = 65432
 
-    # Create a TCP socket
-    #
-    # AF_INET     = Use IPv4 addresses
-    # SOCK_STREAM = Use TCP protocol
+    # Take message from the user
+    message = input("Enter a message: ")
 
-    server_socket = socket.socket(
+
+    # ========================================================
+    # STEP 3: CALCULATE LOCAL HASH
+    # ========================================================
+
+    # Calculate hash before sending the message
+    #
+    # This hash will be compared with the server's hash.
+
+    local_hash = djb2_hash(message)
+
+    print("Local Hash:", local_hash)
+
+
+    # ========================================================
+    # STEP 4: CREATE SOCKET AND CONNECT TO SERVER
+    # ========================================================
+
+    # Create an IPv4 TCP socket
+    client_socket = socket.socket(
         socket.AF_INET,
         socket.SOCK_STREAM
     )
 
-    # Allow the server to reuse its address after restarting
-    server_socket.setsockopt(
-        socket.SOL_SOCKET,
-        socket.SO_REUSEADDR,
-        1
-    )
+    try:
 
-    # Bind the server to its IP address and port
-    server_socket.bind((host, port))
+        # Connect to the server using its IP and port
+        client_socket.connect((host, port))
 
-    # Start listening for client connections
-    #
-    # 1 = requested backlog of pending connections
-    server_socket.listen(1)
-
-    print("Server is waiting for a client...")
+        print("Connected to server.")
 
 
-    # ========================================================
-    # STEP 3: ACCEPT AND HANDLE CLIENT CONNECTIONS
-    # ========================================================
+        # ====================================================
+        # STEP 5: SEND MESSAGE
+        # ====================================================
 
-    # Keep the server running for multiple clients
-    while True:
-
-        # Wait until a client connects
+        # Convert message into bytes using encode()
         #
-        # conn = socket used to communicate with the client
-        # addr = address of the connected client
+        # Example:
+        # "ABC" becomes b'ABC'
+        #
+        # sendall() sends the message to the server.
 
-        conn, addr = server_socket.accept()
+        client_socket.sendall(
+            message.encode("utf-8")
+        )
 
-        print("\nClient connected:", addr)
-
-        try:
-
-            # Receive up to 1024 bytes from the client
-            #
-            # recv() returns bytes, not a normal string
-
-            received_data = conn.recv(1024)
-
-            # Check if the client sent any data
-            if not received_data:
-                print("No data received.")
-                continue
-
-            # Convert bytes into a normal Python string
-            #
-            # Example:
-            # b'ABC' becomes 'ABC'
-
-            message = received_data.decode("utf-8")
-
-            print("Received message:", message)
+        print("Message sent to server.")
 
 
-            # =================================================
-            # STEP 4: CALCULATE HASH
-            # =================================================
+        # ====================================================
+        # STEP 6: RECEIVE HASH FROM SERVER
+        # ====================================================
 
-            # Calculate the DJB2 hash of the received message
-            hash_value = djb2_hash(message)
+        # Receive up to 1024 bytes from server
+        received_hash = client_socket.recv(1024)
 
-            print("Calculated Hash:", hash_value)
+        # Convert received bytes into a string
+        #
+        # Example:
+        # b'193450027' becomes '193450027'
+
+        received_hash = received_hash.decode("utf-8")
+
+        # Convert string into integer using int()
+        #
+        # Example:
+        # '193450027' becomes 193450027
+
+        server_hash = int(received_hash)
+
+        print("Server Hash:", server_hash)
 
 
-            # =================================================
-            # STEP 5: SEND HASH BACK TO CLIENT
-            # =================================================
+        # ====================================================
+        # STEP 7: VERIFY DATA INTEGRITY
+        # ====================================================
 
-            # The hash is an integer.
-            #
-            # First convert integer into string using str().
-            # Then convert string into bytes using encode().
-            #
-            # sendall() sends all supplied bytes unless
-            # a network error occurs.
+        # Compare the locally calculated hash
+        # with the hash received from the server.
 
-            conn.sendall(
-                str(hash_value).encode("utf-8")
-            )
+        if local_hash == server_hash:
 
-            print("Hash sent to client.")
+            # Both hashes are equal
+            print("Integrity Verified!")
+            print("Data was received without a detected change.")
 
-        except Exception as e:
+        else:
 
-            # Display an error if communication fails
-            print("Error:", e)
+            # Hashes are different
+            print("Integrity Check Failed!")
+            print("Data may have been modified.")
 
-        finally:
 
-            # Close the connection with this client
-            #
-            # The main server socket remains open
-            # and can accept another client.
+    except Exception as e:
 
-            conn.close()
+        # Display error if connection or communication fails
+        print("Error:", e)
+
+    finally:
+
+        # Close the client socket after communication
+        client_socket.close()
 
 
 # ============================================================
 # MAIN PROGRAM
 # ============================================================
 
-# Run the server when this file is executed directly
-
 if __name__ == "__main__":
-    start_server()
+    start_client()
