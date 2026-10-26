@@ -1,86 +1,420 @@
-'''Implement the Paillier encryption scheme in Python. Encrypt two integers (e.g., 15 and 25)
-using your implementation of the Paillier encryption scheme. Print the ciphertexts. Perform
-an addition operation on the encrypted integers without decrypting them. Print the result of
-the addition in encrypted form. Decrypt the result of the addition and verify that it matches
-the sum of the original integers'''
-import math
-import random
+
+# ============================================================
+# LAB 7 - CODE 1
+# PAILLIER HOMOMORPHIC ADDITION
+# ============================================================
+#
+# AIM:
+# To encrypt two integers using Paillier encryption,
+# perform addition without decrypting them, and verify
+# the result after decryption.
+#
+# WHAT IS HOMOMORPHIC ENCRYPTION?
+#
+# Homomorphic encryption allows us to perform certain
+# mathematical operations directly on encrypted data.
+#
+# We do not need to decrypt the data before calculation.
+#
+# WHAT IS PAILLIER?
+#
+# Paillier is an asymmetric encryption algorithm.
+# It supports ADDITIVE HOMOMORPHIC ENCRYPTION.
+#
+# IMPORTANT PROPERTY:
+#
+# E(a) * E(b) mod n^2 = E(a + b)
+#
+# This means:
+#
+# Multiplication of ciphertexts
+#           =
+# Addition of original plaintexts
+#
+# EXAMPLE:
+#
+# Original numbers: 15 and 25
+#
+# Step 1: Encrypt 15 -> C1
+# Step 2: Encrypt 25 -> C2
+# Step 3: Calculate (C1 * C2) mod n^2
+# Step 4: Decrypt the result
+#
+# Final result = 40
+#
+# NOTE:
+# Paillier arithmetic works modulo n.
+# For this experiment, use small nonnegative integers
+# whose sum is less than n.
+#
+# ============================================================
+
+
+# Import required libraries
+
+import math       # Used to calculate GCD and LCM
+import secrets    # Generates secure random numbers
+
+# Used to generate large prime numbers
 from Crypto.Util import number
 
 
-# 1. Key Generation (Dynamic Primes)
-def generate_keys(bits=512):
-    p = number.getPrime(bits // 2)
-    q = number.getPrime(bits // 2)
+# ============================================================
+# STEP 1: GENERATE PUBLIC AND PRIVATE KEYS
+# ============================================================
+
+def generate_keys():
+
+    # Generate two random 256-bit prime numbers.
+    #
+    # A prime number is divisible only by 1 and itself.
+    #
+    # Example of small primes: 3, 5, 7, 11
+    #
+    # We use 256-bit primes so their product is
+    # approximately 512 bits.
+    #
+    # NOTE: 512-bit keys are for lab demonstration only.
+    # Real applications require larger secure parameters.
+
+    p = number.getPrime(256)
+    q = number.getPrime(256)
+
+    # Make sure p and q are different.
+    #
+    # Paillier requires two distinct prime numbers.
+
+    while p == q:
+        q = number.getPrime(256)
+
+
+    # --------------------------------------------------------
+    # CALCULATE n AND n^2
+    # --------------------------------------------------------
+
+    # Formula:
+    # n = p * q
+
     n = p * q
-    n_sq = n * n
-    lam = (p - 1) * (q - 1) // math.gcd(p - 1, q - 1)
+
+    # Calculate n squared.
+    #
+    # Paillier encryption calculations use modulo n^2.
+
+    n_squared = n * n
+
+
+    # --------------------------------------------------------
+    # CALCULATE LAMBDA
+    # --------------------------------------------------------
+
+    # Lambda is calculated using:
+    #
+    # lambda = LCM(p-1, q-1)
+    #
+    # LCM means Least Common Multiple.
+    #
+    # Formula:
+    #
+    # LCM(a,b) = (a*b) / GCD(a,b)
+    #
+    # Example:
+    # LCM(4,6) = 12
+
+    lam = math.lcm(p - 1, q - 1)
+
+
+    # --------------------------------------------------------
+    # CALCULATE g
+    # --------------------------------------------------------
+
+    # Paillier uses a public parameter g.
+    #
+    # A common simple choice is:
+    #
+    # g = n + 1
+
     g = n + 1
-    # Compute mu = (L(g^lam mod n^2))^-1 mod n
-    u = pow(g, lam, n_sq)
-    l_val = (u - 1) // n
-    mu = pow(l_val, -1, n)
-    # Public key: (n, n_sq, g), Private key: (lam, mu)
-    return (n, n_sq, g), (lam, mu)
 
 
-# 2. Encryption
-def encrypt(pub_key, plaintext):
-    n, n_sq, g = pub_key
-    # Choose random blinding factor r coprime to n
+    # --------------------------------------------------------
+    # CALCULATE MU
+    # --------------------------------------------------------
+
+    # Mu is part of the private key.
+    #
+    # Formula:
+    #
+    # mu = inverse(L(g^lambda mod n^2)) mod n
+    #
+    # Where:
+    #
+    # L(u) = (u - 1) // n
+    #
+    # We first calculate g^lambda mod n^2.
+
+    u = pow(g, lam, n_squared)
+
+    # Apply the L function.
+    #
+    # // means integer division.
+
+    L_value = (u - 1) // n
+
+    # Calculate modular inverse.
+    #
+    # pow(a, -1, n) finds a number b such that:
+    #
+    # (a * b) % n = 1
+    #
+    # With g = n+1, L_value equals lambda mod n.
+    # A valid key requires this inverse to exist.
+
+    mu = pow(L_value, -1, n)
+
+
+    # --------------------------------------------------------
+    # RETURN THE KEYS
+    # --------------------------------------------------------
+
+    # Public key contains:
+    # n, n^2 and g
+    #
+    # Private key contains:
+    # lambda and mu
+
+    public_key = (n, n_squared, g)
+    private_key = (lam, mu)
+
+    return public_key, private_key
+
+
+# ============================================================
+# STEP 2: ENCRYPT A NUMBER
+# ============================================================
+
+def encrypt(public_key, message):
+
+    # Extract public key values.
+    #
+    # These values were returned by generate_keys().
+
+    n, n_squared, g = public_key
+
+
+    # --------------------------------------------------------
+    # GENERATE RANDOM VALUE r
+    # --------------------------------------------------------
+
+    # Paillier uses a random number r during encryption.
+    #
+    # This makes encryption probabilistic.
+    #
+    # It means encrypting the same number twice can
+    # produce different ciphertexts.
+    #
+    # We need:
+    #
+    # GCD(r, n) = 1
+    #
+    # This means r and n must be coprime.
+
     while True:
-        r = random.randint(1, n - 1)
+
+        # Generate a secure random integer from 1 to n-1
+
+        r = secrets.randbelow(n - 1) + 1
+
+        # Check whether r and n are coprime
+
         if math.gcd(r, n) == 1:
             break
 
-    # c = (g^m * r^n) mod n^2
-    term1 = pow(g, plaintext, n_sq)
-    term2 = pow(r, n, n_sq)
-    return (term1 * term2) % n_sq
+
+    # --------------------------------------------------------
+    # CALCULATE CIPHERTEXT
+    # --------------------------------------------------------
+
+    # Paillier encryption formula:
+    #
+    # C = (g^m * r^n) mod n^2
+    #
+    # Here:
+    #
+    # m = Original message
+    # g = Public parameter
+    # r = Random value
+    # n = Public modulus
+    #
+    # pow(a, b, c) calculates (a^b) mod c.
+    #
+    # This is much more efficient than calculating
+    # a^b first and then taking the remainder.
+
+    # Calculate first part:
+    # g^message mod n^2
+
+    part1 = pow(g, message, n_squared)
+
+    # Calculate second part:
+    # r^n mod n^2
+
+    part2 = pow(r, n, n_squared)
+
+    # Multiply both parts and take modulo n^2
+
+    ciphertext = (part1 * part2) % n_squared
+
+    # Return the encrypted number
+    return ciphertext
 
 
-# 3. Decryption
-def decrypt(pub_key, priv_key, ciphertext):
-    n, n_sq, _ = pub_key
-    lam, mu = priv_key
-    # m = L(c^lam mod n^2) * mu mod n
-    u = pow(ciphertext, lam, n_sq)
-    l_val = (u - 1) // n
-    return (l_val * mu) % n
+# ============================================================
+# STEP 3: DECRYPT THE ENCRYPTED NUMBER
+# ============================================================
+
+def decrypt(public_key, private_key, ciphertext):
+
+    # Extract public key values
+    n, n_squared, g = public_key
+
+    # Extract private key values
+    lam, mu = private_key
 
 
-# --- Main Experiment ---
+    # --------------------------------------------------------
+    # PAILLIER DECRYPTION FORMULA
+    # --------------------------------------------------------
+
+    # Formula:
+    #
+    # m = L(C^lambda mod n^2) * mu mod n
+    #
+    # Where:
+    #
+    # L(u) = (u - 1) // n
+    #
+    # STEP 1:
+    # Calculate C^lambda mod n^2
+
+    u = pow(ciphertext, lam, n_squared)
+
+    # STEP 2:
+    # Apply the L function
+
+    L_value = (u - 1) // n
+
+    # STEP 3:
+    # Multiply by mu and take modulo n
+
+    message = (L_value * mu) % n
+
+    # Return the decrypted number
+    return message
+
+
+# ============================================================
+# MAIN PROGRAM
+# ============================================================
+
 if __name__ == "__main__":
-    # FIX: changed bit_length=512 to bits=512
-    pub_key, priv_key = generate_keys(bits=512)
-    n, n_sq, _ = pub_key
 
-    # Values to test
-    val1 = int(input("Enter the first integer: "))
-    val2 = int(input("Enter the second integer: "))
-    expected_sum = val1 + val2
-    print(f"Adding numbers: {val1} + {val2} = {expected_sum}\n")
+    print("PAILLIER HOMOMORPHIC ADDITION")
 
-    # Step 1: Encrypt
-    c1 = encrypt(pub_key, val1)
-    c2 = encrypt(pub_key, val2)
 
-    print(f"Ciphertext for {val1}:")
-    print(f"{c1}\n")
+    # --------------------------------------------------------
+    # STEP 1: GENERATE KEYS
+    # --------------------------------------------------------
 
-    print(f"Ciphertext for {val2}:")
-    print(f"{c2}\n")
+    public_key, private_key = generate_keys()
 
-    # Step 2: Add ciphertexts (Multiply them together)
-    c_sum = (c1 * c2) % n_sq
-    print(f"Resulting Encrypted Sum:\n{c_sum}\n")
+    # Extract n and n^2 from the public key
+    n, n_squared, g = public_key
 
-    # Step 3: Decrypt
-    decrypted_sum = decrypt(pub_key, priv_key, c_sum)
-    print(f"Decrypted Sum Value: {decrypted_sum}")
 
-    # Check
+    # --------------------------------------------------------
+    # STEP 2: TAKE INPUT
+    # --------------------------------------------------------
+
+    # Take two integers from the user
+
+    num1 = int(input("Enter first number: "))
+    num2 = int(input("Enter second number: "))
+
+    # Calculate expected result using normal addition.
+    #
+    # We use this only to verify the final result.
+
+    expected_sum = num1 + num2
+
+    # This demonstration uses nonnegative numbers
+    # whose sum fits in the plaintext range.
+
+    if num1 < 0 or num2 < 0 or expected_sum >= n:
+        print("Enter nonnegative numbers with sum less than n.")
+        raise SystemExit
+
+    print("\nExpected Sum:", expected_sum)
+
+
+    # --------------------------------------------------------
+    # STEP 3: ENCRYPT BOTH NUMBERS
+    # --------------------------------------------------------
+
+    # Encrypt first number using public key
+
+    c1 = encrypt(public_key, num1)
+
+    # Encrypt second number using public key
+
+    c2 = encrypt(public_key, num2)
+
+    print("\nEncrypted First Number:", c1)
+    print("Encrypted Second Number:", c2)
+
+
+    # --------------------------------------------------------
+    # STEP 4: HOMOMORPHIC ADDITION
+    # --------------------------------------------------------
+
+    # IMPORTANT:
+    #
+    # To ADD the original numbers, we MULTIPLY
+    # their ciphertexts.
+    #
+    # Formula:
+    #
+    # Encrypted Sum = (C1 * C2) mod n^2
+    #
+    # We do NOT decrypt C1 or C2 here.
+
+    encrypted_sum = (c1 * c2) % n_squared
+
+    print("\nEncrypted Sum:", encrypted_sum)
+
+
+    # --------------------------------------------------------
+    # STEP 5: DECRYPT THE RESULT
+    # --------------------------------------------------------
+
+    # Decrypt only the final encrypted sum.
+
+    decrypted_sum = decrypt(
+        public_key,
+        private_key,
+        encrypted_sum
+    )
+
+    print("\nDecrypted Sum:", decrypted_sum)
+
+
+    # --------------------------------------------------------
+    # STEP 6: VERIFY THE RESULT
+    # --------------------------------------------------------
+
+    # Compare decrypted sum with normal addition.
+
     if decrypted_sum == expected_sum:
-        print("Success!")
+        print("SUCCESS: Homomorphic addition verified!")
     else:
-        print("Failure.")
+        print("FAILED: Results do not match!")
